@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bakery Production Recording</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #fdfaf6; /* Light cream background */
+        }
+        .container {
+            max-width: 768px; /* md:max-w-2xl equivalent */
+        }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #f97316; /* Deep orange */
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #ea580c; /* Darker orange */
+        }
+    </style>
+</head>
+<body class="bg-orange-50 min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="container w-full bg-white shadow-xl rounded-xl p-8 space-y-8">
+        <div class="text-center">
+            <h2 class="mt-6 text-4xl font-extrabold text-orange-700 tracking-tight">
+                Bakery Production Record
+            </h2>
+            <p class="mt-2 text-sm text-gray-600">
+                Log daily production batches for your central unit or outlets.
+            </p>
+        </div>
+
+        <div class="space-y-6">
+            <!-- Production Unit Selection -->
+            <div>
+                <label for="productionUnitSelect" class="block text-sm font-medium text-gray-700 mb-2">Production Unit:</label>
+                <select id="productionUnitSelect" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md shadow-sm">
+                    <option value="main_bakery">Main Production Bakery</option>
+                    <option value="outlet_1_kitchen">Outlet 1 - Small Kitchen</option>
+                    <option value="outlet_2_kitchen">Outlet 2 - Small Kitchen</option>
+                </select>
+            </div>
+
+            <!-- Product Selection (Now dynamically loaded) -->
+            <div>
+                <label for="productSelect" class="block text-sm font-medium text-gray-700 mb-2">Product Produced:</label>
+                <select id="productSelect" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md shadow-sm">
+                    <option value="">Loading products...</option>
+                </select>
+            </div>
+
+            <!-- Quantity Produced -->
+            <div>
+                <label for="quantityProduced" class="block text-sm font-medium text-gray-700 mb-2">Quantity Produced:</label>
+                <input type="number" id="quantityProduced" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" placeholder="e.g., 100" min="1">
+            </div>
+
+            <!-- Raw Materials Used (Optional / Simple Input) -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Raw Materials Used (Optional):</label>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="flourUsed" class="block text-xs font-medium text-gray-500">Flour (kg)</label>
+                        <input type="number" id="flourUsed" step="0.1" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" placeholder="e.g., 5.0">
+                    </div>
+                    <div>
+                        <label for="butterUsed" class="block text-xs font-medium text-gray-500">Butter (kg)</label>
+                        <input type="number" id="butterUsed" step="0.1" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" placeholder="e.g., 2.0">
+                    </div>
+                    <!-- Add more raw materials as needed -->
+                </div>
+            </div>
+
+            <button id="recordProductionBtn" class="mt-6 w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition duration-150 ease-in-out">
+                <i class="fas fa-save mr-2"></i>Record Production
+            </button>
+        </div>
+
+        <!-- Notification/Success Message -->
+        <div id="notification" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg text-center text-lg z-50">
+            Production Recorded Successfully!
+        </div>
+        <div id="error-notification" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg text-center text-lg z-50">
+            Error Recording Production!
+        </div>
+    </div>
+
+    <script>
+        const PRODUCTION_API_URL = 'http://127.0.0.1:8000/production/record-production/';
+        const PRODUCTS_API_URL = 'http://127.0.0.1:8000/items/manage-products/'; // Endpoint to fetch product list
+
+        // DOM Elements
+        const productionUnitSelect = document.getElementById('productionUnitSelect');
+        const productSelect = document.getElementById('productSelect');
+        const quantityProducedInput = document.getElementById('quantityProduced');
+        const flourUsedInput = document.getElementById('flourUsed');
+        const butterUsedInput = document.getElementById('butterUsed');
+        const recordProductionBtn = document.getElementById('recordProductionBtn');
+        const notification = document.getElementById('notification');
+        const errorNotification = document.getElementById('error-notification');
+
+        let availableProducts = []; // To store products fetched from backend
+
+        // --- Utility Functions ---
+        function showNotification(messageDiv, duration = 3000) {
+            messageDiv.classList.remove('hidden');
+            setTimeout(() => {
+                messageDiv.classList.add('hidden');
+            }, duration);
+        }
+
+        // --- Product Fetching and Rendering for Dropdown ---
+        async function fetchProductsForDropdown() {
+            try {
+                const response = await fetch(PRODUCTS_API_URL, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                if (response.ok) {
+                    availableProducts = await response.json();
+                    console.log('Products loaded for production dropdown:', availableProducts);
+                    renderProductDropdown();
+                } else {
+                    const errorData = await response.json();
+                    console.error('Failed to fetch products for dropdown:', errorData);
+                    productSelect.innerHTML = '<option value="">Error loading products</option>';
+                    showNotification(errorNotification);
+                    errorNotification.textContent = `Error loading products: ${errorData.error || 'Unknown'}`;
+                }
+            } catch (error) {
+                console.error('Network error fetching products for dropdown:', error);
+                productSelect.innerHTML = '<option value="">Network error</option>';
+                showNotification(errorNotification);
+                errorNotification.textContent = `Network error: Could not load products.`;
+            }
+        }
+
+        function renderProductDropdown() {
+            productSelect.innerHTML = ''; // Clear existing options
+            if (availableProducts.length === 0) {
+                productSelect.innerHTML = '<option value="">No products found. Add via billing system.</option>';
+                recordProductionBtn.disabled = true; // Disable button if no products
+            } else {
+                recordProductionBtn.disabled = false;
+                availableProducts.forEach(product => {
+                    const option = document.createElement('option');
+                    option.value = product.id; // Use product ID as value
+                    option.textContent = product.name; // Display product name
+                    productSelect.appendChild(option);
+                });
+            }
+        }
+
+        // --- Event Listener for Recording Production ---
+        recordProductionBtn.addEventListener('click', async () => {
+            const production_unit_id = productionUnitSelect.value;
+            const product_id = productSelect.value;
+            const quantity_produced = parseInt(quantityProducedInput.value);
+            const flour_used = parseFloat(flourUsedInput.value) || 0;
+            const butter_used = parseFloat(butterUsedInput.value) || 0;
+
+            if (!production_unit_id || !product_id || isNaN(quantity_produced) || quantity_produced <= 0) {
+                errorNotification.textContent = "Please fill in all required fields (Production Unit, Product, Quantity).";
+                showNotification(errorNotification);
+                return;
+            }
+
+            const payload = {
+                production_unit_id: production_unit_id,
+                product_id: product_id,
+                quantity_produced: quantity_produced,
+                raw_materials_used: {
+                    flour_kg: flour_used,
+                    butter_kg: butter_used,
+                }
+            };
+
+            console.log('Sending production payload:', payload);
+
+            try {
+                const response = await fetch(PRODUCTION_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Production recorded successfully:', data);
+                    notification.textContent = "Production Recorded Successfully!";
+                    showNotification(notification);
+                    // Clear fields after successful recording
+                    quantityProducedInput.value = '';
+                    flourUsedInput.value = '';
+                    butterUsedInput.value = '';
+                } else {
+                    const errorData = await response.json();
+                    console.error('Error recording production:', response.status, errorData);
+                    errorNotification.textContent = `Error: ${errorData.error || 'Unknown error'}`;
+                    showNotification(errorNotification);
+                }
+            } catch (error) {
+                console.error('Network or other error:', error);
+                errorNotification.textContent = `Network Error: ${error.message || 'Check connection'}`;
+                showNotification(errorNotification);
+            }
+        });
+
+        // --- Initialization on Load ---
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchProductsForDropdown(); // Fetch products when the page loads
+        });
+    </script>
+</body>
+</html>

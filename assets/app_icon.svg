@@ -1,0 +1,18 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background: Deep Orange, rounded corners as per your app's aesthetic -->
+    <rect width="512" height="512" rx="100" fill="#E84F2B"/>
+
+    <!-- Stylized 'A' in white -->
+    <text x="200" y="260" font-family="Inter" font-size="200" font-weight="bold" text-anchor="middle" fill="#FFFFFF">A</text>
+
+    <!-- Stylized 'B' overlapping slightly, or next to 'A' -->
+    <text x="312" y="380" font-family="Inter" font-size="200" font-weight="bold" text-anchor="middle" fill="#FFFFFF">B</text>
+
+    <!-- Optional: A subtle bakery-related graphic if desired, e.g., a rolling pin or wheat stalk -->
+    <!-- For simplicity and clear letter focus, we'll keep it as text for now. -->
+
+    <!-- Example of a very subtle bakery accent if you want it: -->
+    <!-- <circle cx="400" cy="112" r="30" fill="#FFC107"/> -->
+    <!-- <path d="M400 112 L410 122 L390 122 Z" fill="#FFC107"/> -->
+
+</svg>
