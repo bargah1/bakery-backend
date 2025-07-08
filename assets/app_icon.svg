@@ -2,17 +2,15 @@
     <!-- Background: Deep Orange, rounded corners as per your app's aesthetic -->
     <rect width="512" height="512" rx="100" fill="#E84F2B"/>
 
-    <!-- Stylized 'A' in white -->
-    <text x="200" y="260" font-family="Inter" font-size="200" font-weight="bold" text-anchor="middle" fill="#FFFFFF">A</text>
-
-    <!-- Stylized 'B' overlapping slightly, or next to 'A' -->
-    <text x="312" y="380" font-family="Inter" font-size="200" font-weight="bold" text-anchor="middle" fill="#FFFFFF">B</text>
-
-    <!-- Optional: A subtle bakery-related graphic if desired, e.g., a rolling pin or wheat stalk -->
-    <!-- For simplicity and clear letter focus, we'll keep it as text for now. -->
-
-    <!-- Example of a very subtle bakery accent if you want it: -->
-    <!-- <circle cx="400" cy="112" r="30" fill="#FFC107"/> -->
-    <!-- <path d="M400 112 L410 122 L390 122 Z" fill="#FFC107"/> -->
-
+    <!-- Improved Stylized 'ao' / Infinity Symbol from Asthana Logo (White color) -->
+    <!-- This path is a more refined attempt to capture the essence of the overlapping 'ao' or infinity symbol
+         from your logo. It uses Bézier curves for smoother transitions. -->
+    <path d="M256 180 C 180 180 140 220 140 256 C 140 292 180 332 256 332 C 332 332 372 292 372 256 C 372 220 332 180 256 180 Z" fill="#FFFFFF"/>
+    
+    <!-- Adjustments for the overlapping effect -->
+    <path d="M256 180 C 290 180 320 200 340 232 C 360 264 370 308 370 308 C 370 308 360 352 340 384 C 320 416 290 436 256 436 C 222 436 192 416 172 384 C 152 352 142 308 142 308 C 142 308 152 264 172 232 C 192 200 222 180 256 180 Z" fill="#E84F2B"/>
+    <path d="M140 256 C 140 220 180 180 256 180 C 332 180 372 220 372 256 C 372 292 332 332 256 332 C 180 332 140 292 140 256 Z" fill="#FFFFFF"/>
+    <path d="M256 120 C 170 120 120 190 120 256 C 120 322 170 392 256 392 C 342 392 392 322 392 256 C 392 190 342 120 256 120 Z" fill="#FFFFFF"/>
+    <path d="M256 120 C 290 120 320 140 340 172 C 360 204 370 248 370 248 C 370 248 360 292 340 324 C 320 356 290 376 256 376 C 222 376 192 356 172 324 C 152 292 142 248 142 248 C 142 248 152 204 172 172 C 192 140 222 120 256 120 Z" fill="#E84F2B"/>
+    <path d="M156 256 C 156 200 200 156 256 156 C 312 156 356 200 356 256 C 356 312 312 356 256 356 C 200 356 156 312 156 256 Z" fill="#FFFFFF"/>
 </svg>

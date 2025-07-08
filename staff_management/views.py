@@ -1,42 +1,31 @@
-# staff_management/views.py
+# In staff_management/views.py
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from datetime import datetime, timedelta
 from bakery_ai_manager.firestore_client import get_firestore_client
-from google.cloud import storage 
-import os 
-from firebase_admin import credentials 
-from bakery_ai_manager.firestore_client import SERVICE_ACCOUNT_KEY_PATH 
-
-# Imports for Facial Recognition
+from google.cloud.firestore_v1.base_query import FieldFilter
+# All other imports (storage, face_recognition, etc.) are assumed to be here
 import face_recognition
 import numpy as np
-import cv2 
-import requests 
+import cv2
+import requests
+from google.cloud import storage
 
 
 db = get_firestore_client()
-
-# Configure your Google Cloud Storage bucket
-# ⭐ IMPORTANT: REPLACE 'manger-ai-staff-images' with your actual, unique GCS bucket name
-GCS_BUCKET_NAME = 'manger-ai-staff-images' 
-
-# Initialize storage client with explicit credentials from the service account key
+GCS_BUCKET_NAME = 'manger-ai-staff-images'
 try:
-    gcs_cred = credentials.Certificate(SERVICE_ACCOUNT_KEY_PATH)
-    storage_client = storage.Client(credentials=gcs_cred.get_credential()) 
-    gcs_bucket = storage_client.get_bucket(GCS_BUCKET_NAME)
-    print(f"DEBUG: Google Cloud Storage client initialized successfully for bucket: {GCS_BUCKET_NAME}")
+    storage_client = storage.Client()
+    gcs_bucket = storage_client.bucket(GCS_BUCKET_NAME)
+    print(f"DEBUG: GCS client initialized for bucket: {GCS_BUCKET_NAME}")
 except Exception as e:
-    print(f"ERROR: Failed to initialize Google Cloud Storage client: {e}")
-    gcs_bucket = None 
-
-# --- Cache for known staff encodings (global for the server instance) ---
-# Stores a dictionary mapping staff_id to a list of NumPy array encodings
-_known_staff_encodings = {} 
-_staff_names_by_id = {}     
+    print(f"ERROR: Failed to initialize GCS client: {e}")
+    gcs_bucket = None
+# --- Cache for known staff encodings ---
+_known_staff_encodings = {}
+_staff_names_by_id = {}
 
 # --- Helper function for face encoding from image URLs ---
 def _generate_face_encodings(image_urls):
@@ -44,7 +33,7 @@ def _generate_face_encodings(image_urls):
     for url in image_urls:
         try:
             response = requests.get(url)
-            response.raise_for_status() 
+            response.raise_for_status()
             
             image_array = np.frombuffer(response.content, np.uint8)
             img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
@@ -56,17 +45,17 @@ def _generate_face_encodings(image_urls):
             face_encodings_in_image = face_recognition.face_encodings(img)
             if face_encodings_in_image:
                 for encoding in face_encodings_in_image:
-                    encodings_for_all_images.append(encoding.tolist()) 
+                    encodings_for_all_images.append(encoding.tolist())
             else:
                 print(f"WARNING: No face found in image from URL: {url}")
         except Exception as e:
             print(f"ERROR: Failed to process image {url} for encoding: {e}")
-    return encodings_for_all_images 
+    return encodings_for_all_images
 
 # --- Helper function to load all staff encodings from Firestore into cache ---
 def _load_known_staff_encodings():
     global _known_staff_encodings, _staff_names_by_id
-    _known_staff_encodings = {} # Clear existing cache
+    _known_staff_encodings = {}
     _staff_names_by_id = {}
     print("DEBUG: Loading known staff encodings from Firestore...")
     try:
@@ -78,16 +67,14 @@ def _load_known_staff_encodings():
             
             face_encodings_flat = staff_data.get('face_encodings', [])
             
-            if face_encodings_flat and isinstance(face_encodings_flat, list):
+            if face_encodings_flat and isinstance(face_encodings_flat, list) and len(face_encodings_flat) > 0:
                 if len(face_encodings_flat) % 128 == 0:
                     num_encodings = len(face_encodings_flat) // 128
                     reshaped_encodings = np.array(face_encodings_flat).reshape(num_encodings, 128)
                     _known_staff_encodings[staff_id] = [np.array(e) for e in reshaped_encodings]
                     _staff_names_by_id[staff_id] = staff_name
                 else:
-                    print(f"WARNING: Face encodings for {staff_id} have invalid length: {len(face_encodings_flat)}. Skipping.")
-            else:
-                print(f"WARNING: No valid face_encodings found for {staff_id}.")
+                    print(f"WARNING: Face encodings for {staff_id} have invalid length. Skipping.")
         print(f"DEBUG: Loaded {len(_known_staff_encodings)} staff members for recognition.")
     except Exception as e:
         print(f"ERROR: Failed to load known staff encodings for recognition cache: {e}")
@@ -160,25 +147,21 @@ def add_staff(request):
 
 @api_view(["POST"])
 def upload_staff_image(request):
-    """
-    API endpoint to upload a staff image to Google Cloud Storage.
-    (This function only uploads and returns URL; encoding happens in add_staff)
-    """
+
     if gcs_bucket is None:
-        return Response({"error": "Google Cloud Storage is not initialized. Check server logs."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"error": "Google Cloud Storage is not initialized."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     if 'file' not in request.FILES:
         return Response({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)
     
     uploaded_file = request.FILES['file']
-    file_extension = os.path.splitext(uploaded_file.name)[1]
-    destination_blob_name = f"staff_images/{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{uploaded_file.name.replace(' ', '_')}" 
+    destination_blob_name = f"staff_images/{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{uploaded_file.name.replace(' ', '_')}"
 
     try:
         blob = gcs_bucket.blob(destination_blob_name)
         blob.upload_from_file(uploaded_file.file, content_type=uploaded_file.content_type)
         
-        blob.make_public() 
+        blob.make_public()
         public_url = blob.public_url
 
         print(f"DEBUG: Image uploaded to GCS: {public_url}")
@@ -195,36 +178,33 @@ def upload_staff_image(request):
 
 @api_view(["GET"])
 def list_staff(request):
-    """
-    API endpoint to list all staff members, with optional filtering by location_id.
-    """
-    staff_collection_ref = db.collection('staff')
-    query = staff_collection_ref 
-
-    location_id = request.query_params.get('location_id')
+    query = db.collection('staff')
+    location_id = request.GET.get('location_id')
     if location_id:
-        query = query.where('location_id', '==', location_id) 
-
+        query = query.where(filter=FieldFilter('location_id', '==', location_id))
+    
     staff_list = []
     try:
         docs = query.order_by('name').stream() 
         for doc in docs:
             staff_data = doc.to_dict()
             staff_data['id'] = doc.id 
-            # Remove face_encodings from response for security/payload size
             if 'face_encodings' in staff_data:
                 del staff_data['face_encodings'] 
             staff_list.append(staff_data)
         return Response(staff_list, status=status.HTTP_200_OK)
     except Exception as e:
-        print(f"ERROR: Failed to list staff: {e}")
-        return Response({"error": "Failed to retrieve staff list", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"error": f"Failed to list staff: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
 
 @api_view(["DELETE"])
 def delete_staff(request, staff_id):
     """
     API endpoint to delete a staff member by ID.
     """
+    if not staff_id:
+        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
     staff_doc_ref = db.collection('staff').document(staff_id)
     try:
         doc = staff_doc_ref.get()
@@ -444,100 +424,83 @@ def get_cctv_observation_report(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-
 @api_view(["GET"])
 def get_staff_attendance_report(request):
-    """
-    API endpoint to retrieve staff attendance and calculated salary for a given period.
-    """
-    staff_id = request.query_params.get('staff_id')
-    start_date_str = request.query_params.get('start_date')
-    end_date_str = request.query_params.get('end_date')
+    staff_id = request.GET.get('staff_id')
+    start_date_str = request.GET.get('start_date')
+    end_date_str = request.GET.get('end_date')
 
-    attendance_records_ref = db.collection('attendance_records')
-    query = attendance_records_ref
-
-    if staff_id:
-        query = query.where('staff_id', '==', staff_id)
-
-    if start_date_str:
-        query = query.where('date', '>=', start_date_str)
-
-    if end_date_str:
-        query = query.where('date', '<=', end_date_str)
-
-    query = query.order_by('staff_id').order_by('timestamp')
-
-    attendance_data = {}
     staff_salaries = {}
-
     try:
         staff_docs = db.collection('staff').stream()
         for doc in staff_docs:
             staff_info = doc.to_dict()
-            staff_salaries[doc.id] = staff_info.get('salary', 0.0)
+            staff_salaries[doc.id] = {
+                "name": staff_info.get('name', 'Unknown'),
+                "salary": float(staff_info.get('salary', 0.0))
+            }
     except Exception as e:
-        print(f"ERROR: Could not fetch staff salaries: {e}")
-        return Response({"error": "Failed to fetch staff salary info"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"error": f"Could not fetch staff salary data: {e}"}, status=500)
 
+    query = db.collection('attendance_records')
+    if staff_id and staff_id != 'All Staff':
+        query = query.where(filter=FieldFilter('staff_id', '==', staff_id))
+    if start_date_str:
+        query = query.where(filter=FieldFilter('date', '>=', start_date_str))
+    if end_date_str:
+        query = query.where(filter=FieldFilter('date', '<=', end_date_str))
+    
+    query = query.order_by('staff_id').order_by('timestamp')
 
+    attendance_data = {}
     try:
         docs = query.stream()
         for doc in docs:
             record = doc.to_dict()
             s_id = record['staff_id']
             if s_id not in attendance_data:
-                attendance_data[s_id] = {'name': record.get('staff_name', s_id), 'punches': []}
+                staff_name = staff_salaries.get(s_id, {}).get('name', 'Unknown')
+                attendance_data[s_id] = {
+                    'name': record.get('staff_name', staff_name), 
+                    'punches': []
+                }
             attendance_data[s_id]['punches'].append(record)
-
-        report_lines = []
-        report_lines.append("Staff Attendance and Salary Report:\n")
-        report_lines.append("----------------------------------\n")
-
-        if not attendance_data:
-            report_lines.append("No attendance records found for the selected criteria.")
-        else:
-            for s_id, data in sorted(attendance_data.items(), key=lambda item: item[1]['name']):
-                report_lines.append(f"\nStaff: {data['name']} (ID: {s_id})\n")
-
-                total_hours_worked = 0.0
-                clock_in_time = None
-
-                sorted_punches = sorted(data['punches'], key=lambda x: x['timestamp'])
-
-                for punch in sorted_punches:
-                    punch_time_str = punch['timestamp']
-                    punch_type = punch['punch_type']
-
-                    try:
-                        punch_dt = datetime.fromisoformat(punch_time_str)
-                        report_lines.append(f"  - {punch_type.replace('_', ' ').title()} at {punch_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
-
-                        if punch_type == 'clock_in':
-                            clock_in_time = punch_dt
-                        elif punch_type == 'clock_out' and clock_in_time is not None:
-                            duration = punch_dt - clock_in_time
-                            total_hours_worked += duration.total_seconds() / 3600
-                            report_lines.append(f"    (Duration: {str(duration).split('.')[0]})\n")
-                            clock_in_time = None
-                    except ValueError:
-                        report_lines.append(f"  - Invalid timestamp format: {punch_time_str}\n")
-
-                report_lines.append(f"  Total Hours Worked in Period: {total_hours_worked:.2f} hours\n")
-
-                salary_per_hour = staff_salaries.get(s_id, 0.0)
-                estimated_salary = total_hours_worked * salary_per_hour
-
-                report_lines.append(f"  Hourly Salary: ${salary_per_hour:.2f}\n")
-                report_lines.append(f"  Estimated Earnings for Period: ${estimated_salary:.2f}\n")
-
-        report_text = "".join(report_lines)
-        return Response({"report": report_text, "structured_data": attendance_data}, status=status.HTTP_200_OK)
     except Exception as e:
-        print(f"ERROR: Failed to get attendance report: {e}")
-        return Response({"error": "Failed to retrieve attendance report", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return Response({"error": f"Failed to retrieve attendance records: {e}"}, status=500)
 
+    report_lines = ["Staff Attendance and Salary Report:\n", "----------------------------------\n"]
+    if not attendance_data:
+        report_lines.append("No attendance records found for the selected criteria.")
+    else:
+        sorted_staff_data = sorted(attendance_data.items(), key=lambda item: item[1]['name'])
+        for s_id, data in sorted_staff_data:
+            report_lines.append(f"\nStaff: {data['name']} (ID: {s_id})\n")
+            total_duration = timedelta()
+            clock_in_time = None
+            for punch in data['punches']:
+                punch_time = datetime.fromisoformat(punch['timestamp'])
+                punch_type = punch['punch_type']
+                report_lines.append(f"  - {punch_type.replace('_', ' ').title()} at {punch_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                if punch_type == 'clock_in':
+                    clock_in_time = punch_time
+                elif punch_type == 'clock_out' and clock_in_time:
+                    duration = punch_time - clock_in_time
+                    total_duration += duration
+                    days, remainder = divmod(duration.total_seconds(), 86400)
+                    hours, remainder = divmod(remainder, 3600)
+                    minutes, _ = divmod(remainder, 60)
+                    duration_str = f"{int(days)}d {int(hours)}h {int(minutes)}m"
+                    report_lines.append(f"    (Duration: {duration_str})\n")
+                    clock_in_time = None
+            total_hours_worked = total_duration.total_seconds() / 3600
+            salary_per_hour = staff_salaries.get(s_id, {}).get('salary', 0.0)
+            estimated_salary = total_hours_worked * salary_per_hour
+            report_lines.append(f"  Total Hours Worked in Period: {total_hours_worked:.2f} hours\n")
+            report_lines.append(f"  Hourly Salary: ₹{salary_per_hour:.2f}\n")
+            report_lines.append(f"  Estimated Earnings for Period: ₹{estimated_salary:.2f}\n")
+
+    report_text = "".join(report_lines)
+    return Response({"report": report_text, "structured_data": attendance_data}, status=status.HTTP_200_OK)
 
 @api_view(["POST"])
 def record_cctv_observation(request):
@@ -678,5 +641,75 @@ def get_cctv_observation_report(request):
         print(f"ERROR: Failed to retrieve CCTV observation report: {e}")
         return Response(
             {"error": "Failed to retrieve CCTV observation report", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
+@api_view(['DELETE'])
+def delete_attendance_logs(request):
+    """
+    Deletes all attendance records within a specified date range,
+    optionally filtered by a staff member.
+    """
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    staff_id = request.GET.get('staff_id')
+
+    if not start_date or not end_date:
+        return Response({'error': 'Start date and end date are required for deletion.'}, status=400)
+    
+    try:
+        query = db.collection('attendance_records').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
+        
+        if staff_id and staff_id != 'All Staff':
+            query = query.where(filter=FieldFilter('staff_id', '==', staff_id))
+
+        docs_to_delete = list(query.stream())
+        
+        if not docs_to_delete:
+            return Response({'message': 'No attendance logs found in the selected range to delete.'}, status=200)
+
+        batch = db.batch()
+        for doc in docs_to_delete:
+            batch.delete(doc.reference)
+        batch.commit()
+
+        return Response({'message': f'Successfully deleted {len(docs_to_delete)} attendance records.'}, status=200)
+
+    except Exception as e:
+        print(f"ERROR deleting attendance logs: {e}")
+        return Response({'error': f'An unexpected error occurred during deletion: {e}'}, status=500)
+
+
+@api_view(["GET"])
+def get_last_punch_status(request, staff_id):
+    """
+    Finds the very last attendance record for a given staff member
+    to determine if their last action was a clock-in or clock-out.
+    """
+    if not staff_id:
+        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        query = db.collection('attendance_records').where(
+            filter=FieldFilter('staff_id', '==', staff_id)
+        ).order_by(
+            'timestamp', direction=firestore.Query.DESCENDING
+        ).limit(1)
+
+        docs = list(query.stream())
+
+        if not docs:
+            # No records found, so the user's next action must be to clock in.
+            return Response({"last_punch": "none"}, status=status.HTTP_200_OK)
+        
+        last_punch_record = docs[0].to_dict()
+        return Response({
+            "last_punch": last_punch_record.get('punch_type')
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"ERROR: Failed to get last punch status for {staff_id}: {e}")
+        return Response(
+            {"error": "Failed to retrieve last punch status", "details": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

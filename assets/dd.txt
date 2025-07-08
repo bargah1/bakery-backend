@@ -1,0 +1,330 @@
+// --- FULL CODE FOR BILLING APP ---
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:intl/intl.dart' as intl;
+import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+// --- CONFIGURATION ---
+// IMPORTANT: For physical devices, replace 127.0.0.1 with your computer's local network IP address (e.g., 'http://192.168.1.10:8000').
+// For emulators, you can use 'http://10.0.2.2:8000'.
+const String API_BASE_URL = 'http://192.168.1.7:8000'; // EXAMPLE IP
+
+void main() {
+  runApp(const BillingApp());
+}
+
+// ... (BillingApp, Outlet, Product, CartItem models remain the same) ...
+class BillingApp extends StatelessWidget {
+  const BillingApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Asthana Bakery POS',
+      theme: ThemeData(
+        primarySwatch: Colors.amber,
+        scaffoldBackgroundColor: const Color(0xFFFFFBEB),
+        textTheme: GoogleFonts.interTextTheme(Theme.of(context).textTheme),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFD97706),
+          foregroundColor: Colors.white,
+        ),
+      ),
+      home: const BillingScreen(),
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+// --- DATA MODELS ---
+class Outlet {
+  final String id;
+  final String name;
+  final String? phone;
+
+  Outlet({required this.id, required this.name, this.phone});
+
+  factory Outlet.fromJson(Map<String, dynamic> json) {
+    return Outlet(
+      id: json['id'],
+      name: json['name'],
+      phone: json['phone'],
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Outlet && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
+class Product {
+  final String id;
+  final String name;
+  final double price;
+  final String unitType;
+  final String img;
+  final String? barcode;
+
+  Product({
+    required this.id,
+    required this.name,
+    required this.price,
+    this.unitType = 'piece',
+    this.img = '',
+    this.barcode,
+  });
+
+  factory Product.fromJson(Map<String, dynamic> json) {
+    return Product(
+      id: json['id'] ?? '',
+      name: json['name'] ?? 'Unknown',
+      price: (json['price'] as num?)?.toDouble() ?? 0.0,
+      unitType: json['unit_type'] ?? 'piece',
+      img: json['img'] ?? '',
+      barcode: json['barcode'],
+    );
+  }
+}
+
+class CartItem {
+  final String cartId;
+  final Product product;
+  int quantity;
+  double weightGrams;
+  double customPrice;
+  final bool isCustomPriceItem;
+
+  CartItem({
+    required this.cartId,
+    required this.product,
+    this.quantity = 0,
+    this.weightGrams = 0.0,
+    this.customPrice = 0.0,
+    this.isCustomPriceItem = false,
+  });
+
+  bool get isByPiece => product.unitType == 'piece' && !isCustomPriceItem;
+  bool get isByWeight => product.unitType == 'kg' && !isCustomPriceItem;
+  bool get isByCustomPrice => isCustomPriceItem;
+
+  double get total {
+    if (isByCustomPrice) return customPrice;
+    if (isByPiece) return product.price * quantity;
+    if (isByWeight) return (product.price / 1000) * weightGrams;
+    return 0.0;
+  }
+  
+  String get subtitle {
+    if (isByPiece) return 'Qty: $quantity';
+    if (isByWeight) return '${weightGrams.toStringAsFixed(0)} gm';
+    if (isByCustomPrice) return 'Price: ₹${customPrice.toStringAsFixed(2)}';
+    return '';
+  }
+}
+
+class BillingScreen extends StatefulWidget {
+  const BillingScreen({super.key});
+  @override
+  State<BillingScreen> createState() => _BillingScreenState();
+}
+
+class _BillingScreenState extends State<BillingScreen> {
+  List<Product> _products = [];
+  bool _isLoading = true;
+  String? _error;
+  final Map<String, CartItem> _cart = {};
+
+  final SpeechToText _speechToText = SpeechToText();
+  bool _isListening = false;
+  String _voiceStatus = '';
+
+  List<Outlet> _outlets = [];
+  Outlet? _selectedOutlet;
+  bool _isOutletsLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchProducts();
+    _fetchOutlets();
+    _initializeSpeech();
+  }
+
+  // --- All helper functions like _fetchOutlets, _fetchProducts, speech functions etc. go here ---
+  // (These are unchanged from the previous version, so they are collapsed for brevity)
+  Future<void> _fetchOutlets() async { /* ... same as before ... */ }
+  Future<void> _fetchProducts() async { /* ... same as before ... */ }
+  Future<void> _scanBarcode() async { /* ... same as before ... */ }
+  void _handleBarcodeScanned(String barcode) { /* ... same as before ... */ }
+  void _onProductTap(Product product) { /* ... same as before ... */ }
+  void _showPieceQuantityDialog(Product product, {CartItem? existingItem}) { /* ... same as before ... */ }
+  void _showKgAddItemDialog(Product product, {CartItem? existingItem}) { /* ... same as before ... */ }
+  void _showCustomPriceDialog(CartItem item) { /* ... same as before ... */ }
+  void _editCartItem(CartItem item) { /* ... same as before ... */ }
+  void _addItemToCart(Product product, {int quantity = 0, double? weightGrams, double? customPrice, String? existingCartId}) { /* ... same as before ... */ }
+  void _removeItemFromCart(String cartId) { /* ... same as before ... */ }
+  double _getCartTotal() => _cart.values.fold(0.0, (sum, item) => sum + item.total);
+  Future<void> _initializeSpeech() async { /* ... same as before ... */ }
+  Future<void> _startVoiceOrder() async { /* ... same as before ... */ }
+  Future<void> _parseAndAddVoiceOrder(String spokenText) async { /* ... same as before ... */ }
+  void _showSnackBar(String message, {bool isError = false}) { /* ... same as before ... */ }
+  void _clearCart() { /* ... same as before ... */ }
+
+
+  // --- MODIFIED: processSale now gets the numeric_bill_id from the backend ---
+  Future<void> _processSale() async {
+    if (_cart.isEmpty || _selectedOutlet == null) {
+      _showSnackBar('Cart is empty or no outlet selected.', isError: true);
+      return;
+    }
+    
+    final List<CartItem> itemsToProcess = _cart.values.toList();
+    final double totalAmount = _getCartTotal();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(content: Row(children: [CircularProgressIndicator(), SizedBox(width: 16), Text('Processing sale...')])),
+    );
+
+    try {
+      final saleData = {
+        'items': itemsToProcess.map((item) => {
+              'product_id': item.product.id, 'quantity': item.quantity, 'weight_grams': item.weightGrams,
+              'custom_price': item.isByCustomPrice ? item.customPrice : null, 'total': item.total, 'unit_type': item.product.unitType,
+            }).toList(),
+        'total_amount': totalAmount, 'outlet_id': _selectedOutlet!.id,
+      };
+
+      final response = await http.post(
+        Uri.parse('$API_BASE_URL/sales/process/'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(saleData),
+      );
+
+      Navigator.of(context).pop();
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final responseData = jsonDecode(utf8.decode(response.bodyBytes));
+        final numericBillId = responseData['numeric_bill_id']; // <-- GETTING IT FROM BACKEND
+
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Row(children: [Icon(Icons.check_circle, color: Colors.green), SizedBox(width: 8), Text('Sale Completed')]),
+            content: Text('Sale processed successfully!\nBill No: $numericBillId\nTotal: ₹${totalAmount.toStringAsFixed(2)}'),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.print),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _generateAndPrintBill(itemsToProcess, totalAmount, _selectedOutlet, numericBillId);
+                },
+                label: const Text('Print Bill'),
+              ),
+            ],
+          ),
+        );
+        
+        setState(() => _cart.clear());
+        _showSnackBar('Sale completed successfully!', isError: false);
+
+      } else {
+        final errorData = jsonDecode(utf8.decode(response.bodyBytes));
+        throw Exception(errorData['error'] ?? 'Failed to process sale');
+      }
+    } catch (e) {
+        if(Navigator.of(context).canPop()) Navigator.of(context).pop(); 
+        _showSnackBar('Failed to process sale: $e', isError: true);
+    }
+  }
+  
+  // --- MODIFIED: findAndReprintBill now calls the new endpoint ---
+  Future<void> _findAndReprintBill() async {
+    final billNumberController = TextEditingController();
+    final String? numericBillId = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reprint Bill'),
+        content: TextField(controller: billNumberController, decoration: const InputDecoration(labelText: 'Enter Bill Number'), autofocus: true, keyboardType: TextInputType.number),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.of(context).pop(billNumberController.text.trim()), child: const Text('Find')),
+        ],
+      ),
+    );
+
+    if (numericBillId == null || numericBillId.isEmpty) return;
+    
+    try {
+      // --- Calling the new endpoint ---
+      final response = await http.get(Uri.parse('$API_BASE_URL/sales/find/$numericBillId/'));
+
+      if (response.statusCode == 200) {
+        final saleData = jsonDecode(utf8.decode(response.bodyBytes));
+        final List<dynamic> itemMaps = saleData['items'];
+        final List<CartItem> reprintedItems = [];
+        
+        for (var itemMap in itemMaps) {
+          try {
+            final product = _products.firstWhere((p) => p.id == itemMap['product_id']);
+            reprintedItems.add(CartItem(
+              cartId: itemMap['product_id'] + '_reprint', product: product,
+              quantity: (itemMap['quantity'] as num?)?.toInt() ?? 0,
+              weightGrams: (itemMap['weight_grams'] as num?)?.toDouble() ?? 0.0,
+              customPrice: (itemMap['custom_price'] as num?)?.toDouble() ?? 0.0,
+              isCustomPriceItem: itemMap['custom_price'] != null,
+            ));
+          } catch (e) {
+            print("Could not find product ${itemMap['product_id']} for reprinting.");
+          }
+        }
+        
+        final double total = (saleData['total_amount'] as num).toDouble();
+        final String outletIdFromServer = saleData['outlet_id'] ?? '';
+        final Outlet? outletForReprint = _outlets.firstWhere((o) => o.id == outletIdFromServer, orElse: () => Outlet(id: outletIdFromServer, name: outletIdFromServer));
+        
+        await _generateAndPrintBill(reprintedItems, total, outletForReprint, numericBillId);
+      } else {
+        final errorData = jsonDecode(utf8.decode(response.bodyBytes));
+        throw Exception(errorData['error'] ?? 'Bill not found');
+      }
+    } catch (e) {
+      _showSnackBar('Error finding bill: $e', isError: true);
+    }
+  }
+  
+  // ... (generateAndPrintBill and printBill are unchanged) ...
+  Future<void> _generateAndPrintBill(List<CartItem> items, double subtotal, Outlet? outlet, String billId) async { /* ... */ }
+  Future<void> _printBill() async { /* ... */ }
+
+  @override
+  Widget build(BuildContext context) {
+    // ... The entire build method remains the same ...
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Asthana Bakery - POS System'),
+        actions: [
+          IconButton(icon: const Icon(Icons.receipt_long_outlined), onPressed: _findAndReprintBill, tooltip: "Find Bill"),
+          // ... rest of actions
+        ],
+      ),
+      body: /* ... rest of body ... */ Container(),
+    );
+  }
+}
+
+// ... (Other widgets like BarcodeScannerScreen, KgItemDialog etc. are unchanged) ...

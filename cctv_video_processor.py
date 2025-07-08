@@ -11,7 +11,7 @@ VIDEO_PATH = r".\video\WhatsApp Video 2025-06-17 at 1.10.54 PM.mp4"
 # Example: VIDEO_PATH = r'C:\Users\YourUser\Videos\test_footage.mp4'
 # Alternatively, you could use forward slashes: "C:/Users/mxsab/OneDrive/Desktop/IMG_6678.MOV"
 
-DJANGO_RECOGNIZE_FACE_URL = 'http://127.0.0.1:8000/staff/recognize-face/'
+DJANGO_RECOGNIZE_FACE_URL = 'http://192.168.1.3:8000/staff/recognize-face/'
 CAMERA_ID = 'Main_Entrance_Cam_01' # Identify which camera this footage is from
 PROCESS_FRAME_INTERVAL_SECONDS = 5 # Process a frame every X seconds (simulate real-time)
 
@@ -85,7 +85,7 @@ def process_video_for_face_recognition():
         # Removed: cv2.destroyAllWindows() as it causes error if GUI backend is not present
 
 if __name__ == "__main__":
-    print("NOTE: Ensure your Django server is running on http://127.0.0.1:8000/")
+    print("NOTE: Ensure your Django server is running on http://192.168.1.6:8000/")
     print("NOTE: Ensure you have staff registered with images in your Flutter app.")
     process_video_for_face_recognition()
 
