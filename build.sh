@@ -3,7 +3,15 @@
 set -o errexit
 
 pip install --upgrade pip
-# Install the most memory-intensive packages first with --no-cache-dir
+
+echo "Installing torch..."
 pip install torch --no-cache-dir
-# Now install the rest of the requirements
+
+echo "Installing dlib..."
+pip install dlib --no-cache-dir
+
+echo "Installing face-recognition..."
+pip install face-recognition --no-cache-dir
+
+echo "Installing remaining packages..."
 pip install -r requirements.txt
