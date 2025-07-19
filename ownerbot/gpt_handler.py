@@ -5,7 +5,7 @@ import os
 import datetime
 import json
 import base64
-from flask import Flask, request, jsonify
+# from flask import Flask, request, jsonify
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud import translate_v2 as translate, texttospeech
