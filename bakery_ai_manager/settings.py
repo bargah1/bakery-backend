@@ -48,7 +48,7 @@ INSTALLED_APPS = [
     'reports',
     'items',
     'outlets',
-    'sslserver', 
+    # 'sslserver', 
     
 ]
 
