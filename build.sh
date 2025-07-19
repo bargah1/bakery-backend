@@ -2,16 +2,8 @@
 # exit on error
 set -o errexit
 
-pip install --upgrade pip
+# Upgrade pip and setuptools
+pip install --upgrade pip setuptools wheel
 
-echo "Installing torch..."
-pip install torch --no-cache-dir
-
-echo "Installing dlib..."
-pip install dlib --no-cache-dir
-
-echo "Installing face-recognition..."
-pip install face-recognition --no-cache-dir
-
-echo "Installing remaining packages..."
-pip install -r requirements.txt
+# Install dependencies from the cleaned requirements.txt
+pip install -r requirements.txt --no-cache-dir

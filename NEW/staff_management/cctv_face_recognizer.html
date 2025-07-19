@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV Face Recognizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #fdfaf6;
+        }
+        .container {
+            max-width: 768px;
+        }
+        #imagePreview {
+            max-width: 100%;
+            max-height: 200px;
+            object-fit: contain;
+            margin-top: 1rem;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body class="bg-orange-50 min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="container w-full bg-white shadow-xl rounded-xl p-8 space-y-8">
+        <div class="text-center">
+            <h2 class="mt-6 text-4xl font-extrabold text-orange-700 tracking-tight">
+                CCTV Face Recognizer
+            </h2>
+            <p class="mt-2 text-sm text-gray-600">
+                Upload an image to identify staff members.
+            </p>
+        </div>
+
+        <div class="space-y-6">
+            <div>
+                <label for="imageUpload" class="block text-sm font-medium text-gray-700 mb-2">Upload CCTV Frame Image:</label>
+                <input type="file" id="imageUpload" accept="image/*" class="mt-1 block w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-full file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-orange-50 file:text-orange-700
+                    hover:file:bg-orange-100"/>
+                <img id="imagePreview" src="#" alt="Image Preview" class="hidden mx-auto"/>
+            </div>
+
+            <div>
+                <label for="cameraIdInput" class="block text-sm font-medium text-gray-700 mb-2">Camera ID (Optional):</label>
+                <input type="text" id="cameraIdInput" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" placeholder="e.g., MainEntrance_CAM_01">
+            </div>
+
+            <button id="recognizeFaceBtn" class="mt-6 w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 ease-in-out">
+                <i class="fas fa-eye mr-2"></i>Recognize Face
+            </button>
+        </div>
+
+        <div id="results" class="mt-8 p-4 bg-gray-100 rounded-lg shadow-inner">
+            <h3 class="text-xl font-semibold text-gray-800 mb-4">Recognition Results:</h3>
+            <p id="recognitionMessage" class="text-gray-700">No image processed yet.</p>
+            <ul id="identifiedStaffList" class="list-disc pl-5 mt-2 text-gray-800">
+                </ul>
+        </div>
+
+        <div id="notification" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg text-center text-lg z-50">
+            Operation Successful!
+        </div>
+        <div id="error-notification" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg text-center text-lg z-50">
+            Error!
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://192.168.1.3:8000/staff/recognize-face/'; // Django endpoint
+
+        const imageUploadInput = document.getElementById('imageUpload');
+        const imagePreview = document.getElementById('imagePreview');
+        const cameraIdInput = document.getElementById('cameraIdInput');
+        const recognizeFaceBtn = document.getElementById('recognizeFaceBtn');
+        const recognitionMessage = document.getElementById('recognitionMessage');
+        const identifiedStaffList = document.getElementById('identifiedStaffList');
+        const notification = document.getElementById('notification');
+        const errorNotification = document.getElementById('error-notification');
+
+        // Show a temporary notification message
+        function showNotification(messageDiv, duration = 3000) {
+            messageDiv.classList.remove('hidden');
+            setTimeout(() => {
+                messageDiv.classList.add('hidden');
+            }, duration);
+        }
+
+        // Image preview logic
+        imageUploadInput.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    imagePreview.src = e.target.result;
+                    imagePreview.classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
+            } else {
+                imagePreview.src = '#';
+                imagePreview.classList.add('hidden');
+            }
+        });
+
+        recognizeFaceBtn.addEventListener('click', async () => {
+            const file = imageUploadInput.files[0];
+            const camera_id = cameraIdInput.value.trim();
+
+            if (!file) {
+                errorNotification.textContent = "Please select an image to recognize.";
+                showNotification(errorNotification);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            if (camera_id) {
+                formData.append('camera_id', camera_id);
+            }
+
+            recognitionMessage.textContent = 'Processing image...';
+            identifiedStaffList.innerHTML = ''; // Clear previous results
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    body: formData, // FormData sends as multipart/form-data automatically
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    recognitionMessage.textContent = data.message;
+                    if (data.identified_staff && data.identified_staff.length > 0) {
+                        identifiedStaffList.innerHTML = ''; // Clear previous list
+                        data.identified_staff.forEach(staff => {
+                            const li = document.createElement('li');
+                            li.textContent = `${staff.name} (ID: ${staff.staff_id}) - Confidence: ${staff.confidence ? staff.confidence.toFixed(2) : 'N/A'}`;
+                            identifiedStaffList.appendChild(li);
+                        });
+                    }
+                    showNotification(notification);
+                    notification.textContent = data.message;
+                } else {
+                    console.error('Error recognizing face:', response.status, data);
+                    errorNotification.textContent = `Error: ${data.error || 'Unknown error'} (Status: ${response.status})`;
+                    showNotification(errorNotification);
+                }
+            } catch (error) {
+                console.error('Network or other error:', error);
+                errorNotification.textContent = `Network Error: ${error.message || 'Check connection'}`;
+                showNotification(errorNotification);
+            }
+        });
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {
+            // No initial fetch needed, waits for user input
+        });
+    </script>
+</body>
+</html>

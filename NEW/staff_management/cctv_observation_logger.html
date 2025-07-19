@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCTV Observation Logger</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #fdfaf6; /* Light cream background */
+        }
+        .container {
+            max-width: 768px;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #f97316; /* Deep orange */
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #ea580c; /* Darker orange */
+        }
+    </style>
+</head>
+<body class="bg-orange-50 min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="container w-full bg-white shadow-xl rounded-xl p-8 space-y-8">
+        <div class="text-center">
+            <h2 class="mt-6 text-4xl font-extrabold text-orange-700 tracking-tight">
+                CCTV Observation Logger
+            </h2>
+            <p class="mt-2 text-sm text-gray-600">
+                Manually log simulated staff activities and presence.
+            </p>
+        </div>
+
+        <div class="space-y-6">
+            <!-- Staff Member Selection -->
+            <div>
+                <label for="staffSelect" class="block text-sm font-medium text-gray-700 mb-2">Staff Member:</label>
+                <select id="staffSelect" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md shadow-sm">
+                    <option value="">Loading staff...</option>
+                </select>
+            </div>
+
+            <!-- Detected Activity -->
+            <div>
+                <label for="activitySelect" class="block text-sm font-medium text-gray-700 mb-2">Detected Activity:</label>
+                <select id="activitySelect" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md shadow-sm">
+                    <option value="present_in_area">Present in Area</option>
+                    <option value="working_at_counter">Working at Counter</option>
+                    <option value="idle">Idle</option>
+                    <option value="unauthorized_access">Unauthorized Access</option>
+                    <option value="leaving_area">Leaving Area</option>
+                </select>
+            </div>
+
+            <!-- Camera ID -->
+            <div>
+                <label for="cameraIdInput" class="block text-sm font-medium text-gray-700 mb-2">Camera ID:</label>
+                <input type="text" id="cameraIdInput" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" placeholder="e.g., Camera_01_MainEntrance">
+            </div>
+
+            <button id="logObservationBtn" class="mt-6 w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition duration-150 ease-in-out">
+                <i class="fas fa-video mr-2"></i>Log Observation
+            </button>
+        </div>
+
+        <!-- Notification/Success Message -->
+        <div id="notification" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg text-center text-lg z-50">
+            Observation Logged Successfully!
+        </div>
+        <div id="error-notification" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg text-center text-lg z-50">
+            Error Logging Observation!
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://192.168.1.3:8000/staff/record-cctv-observation/'; // Django endpoint
+        const LIST_STAFF_API_URL = 'http://192.168.1.3:8000/staff/list/'; // To get staff list for dropdown
+
+        const staffSelect = document.getElementById('staffSelect');
+        const activitySelect = document.getElementById('activitySelect');
+        const cameraIdInput = document.getElementById('cameraIdInput');
+        const logObservationBtn = document.getElementById('logObservationBtn');
+        const notification = document.getElementById('notification');
+        const errorNotification = document.getElementById('error-notification');
+
+        let allStaff = []; // To store staff list fetched from backend
+
+        // Show a temporary notification message
+        function showNotification(messageDiv, duration = 3000) {
+            messageDiv.classList.remove('hidden');
+            setTimeout(() => {
+                messageDiv.classList.add('hidden');
+            }, duration);
+        }
+
+        // Fetch staff list for dropdown
+        async function fetchStaffForDropdown() {
+            try {
+                const response = await fetch(LIST_STAFF_API_URL, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                if (response.ok) {
+                    allStaff = await response.json();
+                    renderStaffDropdown();
+                } else {
+                    const errorData = await response.json();
+                    console.error('Failed to fetch staff for dropdown:', errorData);
+                    staffSelect.innerHTML = '<option value="">Error loading staff</option>';
+                    showNotification(errorNotification);
+                    errorNotification.textContent = `Error loading staff: ${errorData.error || 'Unknown'}`;
+                }
+            } catch (error) {
+                console.error('Network error fetching staff for dropdown:', error);
+                staffSelect.innerHTML = '<option value="">Network error</option>';
+                showNotification(errorNotification);
+                errorNotification.textContent = `Network error: Could not load staff. Ensure Django server is running.`;
+            }
+        }
+
+        function renderStaffDropdown() {
+            staffSelect.innerHTML = ''; // Clear existing options
+            if (allStaff.length === 0) {
+                staffSelect.innerHTML = '<option value="">No staff found. Add via Staff Management.</option>';
+                logObservationBtn.disabled = true; // Disable button if no staff
+            } else {
+                logObservationBtn.disabled = false;
+                allStaff.forEach(staff => {
+                    const option = document.createElement('option');
+                    option.value = staff.id; // Use staff ID as value
+                    option.textContent = staff.name; // Display staff name
+                    staffSelect.appendChild(option);
+                });
+            }
+        }
+
+
+        logObservationBtn.addEventListener('click', async () => {
+            const staff_id = staffSelect.value;
+            const detected_activity = activitySelect.value;
+            const camera_id = cameraIdInput.value.trim();
+
+            if (!staff_id || !detected_activity || !camera_id) {
+                errorNotification.textContent = "Please select staff, activity, and enter Camera ID.";
+                showNotification(errorNotification);
+                return;
+            }
+
+            const payload = {
+                staff_id: staff_id,
+                detected_activity: detected_activity,
+                camera_id: camera_id,
+                timestamp: new Date().toISOString() // Current time in ISO format
+            };
+
+            console.log('Sending CCTV observation payload:', payload);
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Observation logged successfully:', data);
+                    notification.textContent = "Observation Logged Successfully!";
+                    showNotification(notification);
+                    // Optionally clear fields or refresh recent observations if displayed
+                    cameraIdInput.value = ''; // Clear camera ID after logging
+                } else {
+                    const errorData = await response.json();
+                    console.error('Error logging observation:', response.status, errorData);
+                    errorNotification.textContent = `Error: ${errorData.error || 'Unknown error'}`;
+                    showNotification(errorNotification);
+                }
+            } catch (error) {
+                console.error('Network or other error:', error);
+                errorNotification.textContent = `Network Error: ${error.message || 'Check connection'}`;
+                showNotification(errorNotification);
+            }
+        });
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchStaffForDropdown(); // Fetch staff when the page loads
+        });
+    </script>
+</body>
+</html>
