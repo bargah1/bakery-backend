@@ -9,3 +9,4 @@ numpy==1.26.4
 openai-whisper==20231117
 requests
 Pillow
+python-dotenv
