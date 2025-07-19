@@ -6,7 +6,11 @@ __pycache__/
 env/
 venv/
 *.venv
-NEW/
+
+# Frontend Applications (IMPORTANT)
+bakery_billing_app/
+ownerbot_frontend/
+
 # Django
 *.log
 db.sqlite3
@@ -21,3 +25,4 @@ db.sqlite3
 
 # Firebase Credentials (IMPORTANT)
 serviceAccountKey.json
+client_secrets.json
