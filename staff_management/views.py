@@ -328,77 +328,119 @@ def get_staff_attendance_report(request):
     start_date_str = request.GET.get('start_date')
     end_date_str = request.GET.get('end_date')
 
-    staff_salaries = {}
+    # --- 1. Fetch all staff details first (name, monthly salary) ---
+    staff_details = {}
     try:
-        staff_docs = db.collection('staff').stream()
-        for doc in staff_docs:
+        staff_query = db.collection('staff')
+        if staff_id and staff_id != 'All Staff':
+            staff_query = staff_query.where(filter=FieldFilter('id', '==', staff_id))
+        
+        for doc in staff_query.stream():
             staff_info = doc.to_dict()
-            staff_salaries[doc.id] = {
+            staff_details[doc.id] = {
                 "name": staff_info.get('name', 'Unknown'),
-                "salary": float(staff_info.get('salary', 0.0))
+                "monthly_salary": float(staff_info.get('salary', 0.0))
             }
     except Exception as e:
-        return Response({"error": f"Could not fetch staff salary data: {e}"}, status=500)
+        return Response({"error": f"Could not fetch staff data: {e}"}, status=500)
 
-    query = db.collection('attendance_records')
-    if staff_id and staff_id != 'All Staff':
-        query = query.where(filter=FieldFilter('staff_id', '==', staff_id))
-    if start_date_str:
-        query = query.where(filter=FieldFilter('date', '>=', start_date_str))
-    if end_date_str:
-        query = query.where(filter=FieldFilter('date', '<=', end_date_str))
-    
-    query = query.order_by('staff_id').order_by('timestamp')
-
-    attendance_data = {}
+    # --- 2. Calculate present days for each staff member in the date range ---
+    present_days = {s_id: set() for s_id in staff_details.keys()}
     try:
-        docs = query.stream()
-        for doc in docs:
+        attendance_query = db.collection('attendance_records')
+        if start_date_str:
+            attendance_query = attendance_query.where(filter=FieldFilter('date', '>=', start_date_str))
+        if end_date_str:
+            attendance_query = attendance_query.where(filter=FieldFilter('date', '<=', end_date_str))
+
+        for doc in attendance_query.stream():
             record = doc.to_dict()
-            s_id = record['staff_id']
-            if s_id not in attendance_data:
-                staff_name = staff_salaries.get(s_id, {}).get('name', 'Unknown')
-                attendance_data[s_id] = {
-                    'name': record.get('staff_name', staff_name), 
-                    'punches': []
-                }
-            attendance_data[s_id]['punches'].append(record)
+            s_id = record.get('staff_id')
+            if s_id in present_days:
+                present_days[s_id].add(record.get('date'))
     except Exception as e:
         return Response({"error": f"Failed to retrieve attendance records: {e}"}, status=500)
 
-    report_lines = ["Staff Attendance and Salary Report:\n", "----------------------------------\n"]
-    if not attendance_data:
-        report_lines.append("No attendance records found for the selected criteria.")
-    else:
-        sorted_staff_data = sorted(attendance_data.items(), key=lambda item: item[1]['name'])
-        for s_id, data in sorted_staff_data:
-            report_lines.append(f"\nStaff: {data['name']} (ID: {s_id})\n")
-            total_duration = timedelta()
-            clock_in_time = None
-            for punch in data['punches']:
-                punch_time = datetime.fromisoformat(punch['timestamp'])
-                punch_type = punch['punch_type']
-                report_lines.append(f"  - {punch_type.replace('_', ' ').title()} at {punch_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                if punch_type == 'clock_in':
-                    clock_in_time = punch_time
-                elif punch_type == 'clock_out' and clock_in_time:
-                    duration = punch_time - clock_in_time
-                    total_duration += duration
-                    days, remainder = divmod(duration.total_seconds(), 86400)
-                    hours, remainder = divmod(remainder, 3600)
-                    minutes, _ = divmod(remainder, 60)
-                    duration_str = f"{int(days)}d {int(hours)}h {int(minutes)}m"
-                    report_lines.append(f"    (Duration: {duration_str})\n")
-                    clock_in_time = None
-            total_hours_worked = total_duration.total_seconds() / 3600
-            salary_per_hour = staff_salaries.get(s_id, {}).get('salary', 0.0)
-            estimated_salary = total_hours_worked * salary_per_hour
-            report_lines.append(f"  Total Hours Worked in Period: {total_hours_worked:.2f} hours\n")
-            report_lines.append(f"  Hourly Salary: ₹{salary_per_hour:.2f}\n")
-            report_lines.append(f"  Estimated Earnings for Period: ₹{estimated_salary:.2f}\n")
+    # --- 3. Generate the structured salary report ---
+    salary_report_list = []
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+    end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+    total_days_in_period = (end_date - start_date).days + 1
+    
+    for s_id, details in staff_details.items():
+        days_present = len(present_days.get(s_id, set()))
+        monthly_salary = details['monthly_salary']
+        
+        # Pro-rata salary calculation
+        if total_days_in_period > 0:
+            daily_rate = monthly_salary / 30 # A simple daily rate calculation
+            salary_due = daily_rate * days_present
+        else:
+            salary_due = 0
 
-    report_text = "".join(report_lines)
-    return Response({"report": report_text, "structured_data": attendance_data}, status=status.HTTP_200_OK)
+        # --- 4. Check if this salary period has already been paid ---
+        payment_doc_id = f"{s_id}_{start_date_str}_{end_date_str}"
+        payment_ref = db.collection('salary_payments').document(payment_doc_id)
+        payment_doc = payment_ref.get()
+
+        salary_report_list.append({
+            "staff_id": s_id,
+            "staff_name": details["name"],
+            "total_days_present": days_present,
+            "total_salary_due": round(salary_due, 2),
+            "is_paid": payment_doc.exists # is_paid is true if a payment record exists
+        })
+        
+    return Response(salary_report_list, status=status.HTTP_200_OK)
+
+# --- NEW FUNCTION ---
+@api_view(["POST"])
+def mark_salary_as_paid(request):
+    data = request.data
+    staff_id = data.get('staff_id')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    amount = data.get('amount')
+    status = data.get('status') # This will be True to pay, False to un-pay
+
+    if not all([staff_id, start_date, end_date, amount is not None, status is not None]):
+        return Response({"error": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
+
+    payment_doc_id = f"{staff_id}_{start_date}_{end_date}"
+    payment_ref = db.collection('salary_payments').document(payment_doc_id)
+    expense_ref = db.collection('expenses').document(f"salary_{payment_doc_id}")
+    
+    try:
+        if status is True: # If the app is marking the salary as PAID
+            # 1. Create a payment record
+            payment_ref.set({
+                "staff_id": staff_id,
+                "amount": amount,
+                "payment_date": datetime.now().strftime('%Y-%m-%d'),
+                "period_start": start_date,
+                "period_end": end_date,
+                "expense_doc_id": expense_ref.id,
+            })
+            # 2. Create a corresponding expense record for P&L reports
+            expense_ref.set({
+                "category": "Salary",
+                "amount": amount,
+                "date": datetime.now().strftime('%Y-%m-%d'),
+                "description": f"Salary for staff ID {staff_id} for period {start_date} to {end_date}"
+            })
+            return Response({"message": "Salary marked as paid and expense recorded."}, status=status.HTTP_200_OK)
+        
+        else: # If the app is marking the salary as UNPAID
+            # Delete both the payment and the expense record
+            batch = db.batch()
+            batch.delete(payment_ref)
+            batch.delete(expense_ref)
+            batch.commit()
+            return Response({"message": "Salary payment and expense record reverted."}, status=status.HTTP_200_OK)
+            
+    except Exception as e:
+        return Response({"error": f"An error occurred: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @api_view(["POST"])
 def record_cctv_observation(request):
