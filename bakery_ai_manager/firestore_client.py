@@ -4,46 +4,47 @@ import os
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# --- THIS IS THE SINGLE SOURCE OF AUTHENTICATION ---
-# This method uses a dedicated Service Account key file, which is the most reliable
-# way to authenticate a server application.
+# --- THIS IS THE UPDATED, SECURE, AND CLOUD-NATIVE METHOD ---
+# This method relies on the 'GOOGLE_APPLICATION_CREDENTIALS' environment variable
+# being set securely by your hosting provider (e.g., Render's Secret Files).
+# It does NOT look for a local 'config' folder.
 
-# 1. Define the path to your service account key file.
-#    This assumes you have a 'config' folder in your project's root directory
-#    containing your key file.
-SERVICE_ACCOUNT_KEY_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), # The 'bakery_ai_manager' directory
-    '..',                                       # Go up one level to the project root
-    'config',                                   # Go into the 'config' folder
-    'service_account_key.json'                  # Your key file
-)
+def initialize_and_get_client():
+    """
+    Initializes the Firebase Admin SDK using credentials from the environment
+    and returns a Firestore client. This is the single source of truth for auth.
+    """
+    # This check prevents the app from crashing if the server reloads the module.
+    if not firebase_admin._apps:
+        print("DEBUG: Initializing Firebase Admin SDK...")
+        try:
+            # The SDK will AUTOMATICALLY find and use the credentials from the
+            # GOOGLE_APPLICATION_CREDENTIALS environment variable. No file path is needed here.
+            firebase_admin.initialize_app()
+            print("DEBUG: Firebase Admin SDK initialized successfully.")
 
-# 2. Check if the key file exists.
-if not os.path.exists(SERVICE_ACCOUNT_KEY_PATH):
-    print("="*60)
-    print(f"FATAL ERROR: Service Account Key not found at: {SERVICE_ACCOUNT_KEY_PATH}")
-    print("Please ensure you have a 'config' folder in your project root")
-    print("and that your downloaded service account key is inside it,")
-    print("named 'service_account_key.json'.")
-    print("="*60)
-    exit(1) # Stop the server if the key is missing.
+        except Exception as e:
+            # This error typically happens if the environment variable is missing or points to an invalid file.
+            print("="*80)
+            print("FATAL ERROR: Failed to initialize Firebase Admin SDK.")
+            print(f"Error: {e}")
+            print("\nThis usually means the 'GOOGLE_APPLICATION_CREDENTIALS' environment")
+            print("variable is not set correctly in your hosting environment (e.g., Render).")
+            print("Please ensure your 'Secret File' is set up correctly.")
+            print("="*80)
+            exit(1) # Stop the server if authentication fails.
 
-# 3. Set an environment variable that ALL Google Cloud libraries will automatically use.
-#    This is the key to unifying authentication.
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = SERVICE_ACCOUNT_KEY_PATH
+    # Return the Firestore client from the initialized app.
+    return firestore.client()
 
-# 4. Initialize Firebase Admin SDK (it will use the environment variable automatically).
-if not firebase_admin._apps:
-    try:
-        firebase_admin.initialize_app()
-        print("DEBUG: Firebase Admin SDK initialized successfully using Service Account.")
-    except Exception as e:
-        print(f"FATAL ERROR: Failed to initialize Firebase with Service Account. Error: {e}")
-        exit(1)
-
-# 5. Get a Firestore client instance that uses these credentials.
-db = firestore.client()
+# --- GLOBAL FIRESTORE CLIENT ---
+# Initialize the client once when the app starts and make it available
+# for other parts of your Django project to import and use.
+db = initialize_and_get_client()
 
 def get_firestore_client():
-    """Returns the globally initialized Firestore client."""
+    """
+    Returns the globally initialized Firestore client instance.
+    This function is kept for compatibility with other parts of your app.
+    """
     return db
