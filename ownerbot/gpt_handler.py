@@ -14,7 +14,7 @@ import google.generativeai as genai
 import google.auth
 import numpy as np
 import requests
-import cv2 # Not directly used in the provided snippets, but kept as it was in your original
+#import cv2 # Not directly used in the provided snippets, but kept as it was in your original
 
 # --- For Speech-to-Text (using Replicate API) ---
 import replicate # <-- ADD THIS
