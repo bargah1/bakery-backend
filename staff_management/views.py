@@ -207,6 +207,27 @@ def list_staff(request):
 
 # In your views.py file
 
+@api_view(["DELETE"])
+def delete_staff(request, staff_id):
+    if not staff_id:
+        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+    staff_doc_ref = db.collection('staff').document(staff_id)
+    try:
+        doc = staff_doc_ref.get()
+        if not doc.exists:
+            return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        staff_doc_ref.delete()
+        # _load_known_staff_encodings() # No need to reload cache
+        print(f"DEBUG: Deleted staff member with ID: {staff_id}")
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    except Exception as e:
+        print(f"ERROR: Failed to delete staff member: {e}")
+        return Response(
+            {"error": "Failed to delete staff member", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 @api_view(['POST'])
 def punch_attendance(request):
     """
