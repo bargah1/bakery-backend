@@ -328,26 +328,24 @@ def get_staff_attendance_report(request):
     start_date_str = request.GET.get('start_date')
     end_date_str = request.GET.get('end_date')
 
-    # --- 1. Fetch all staff details first (name, monthly salary) ---
+    # 1. Fetch all staff details first (name, daily salary)
     staff_details = {}
     try:
         staff_query = db.collection('staff')
         if staff_id and staff_id != 'All Staff':
-            staff_query = staff_query.where(filter=FieldFilter('id', '==', staff_id))
-        
-        for doc in staff_query.stream():
-            staff_info = doc.to_dict()
-            staff_details[doc.id] = {
-                "name": staff_info.get('name', 'Unknown'),
-                "monthly_salary": float(staff_info.get('salary', 0.0))
-            }
+            doc = staff_query.document(staff_id).get()
+            if doc.exists:
+                 staff_details[doc.id] = doc.to_dict()
+        else:
+            for doc in staff_query.stream():
+                staff_details[doc.id] = doc.to_dict()
     except Exception as e:
         return Response({"error": f"Could not fetch staff data: {e}"}, status=500)
 
-    # --- 2. Calculate present days for each staff member in the date range ---
-    present_days = {s_id: set() for s_id in staff_details.keys()}
+    # 2. Get all attendance punches in the date range
+    attendance_punches = {}
     try:
-        attendance_query = db.collection('attendance_records')
+        attendance_query = db.collection('attendance_records').order_by('timestamp')
         if start_date_str:
             attendance_query = attendance_query.where(filter=FieldFilter('date', '>=', start_date_str))
         if end_date_str:
@@ -356,39 +354,48 @@ def get_staff_attendance_report(request):
         for doc in attendance_query.stream():
             record = doc.to_dict()
             s_id = record.get('staff_id')
-            if s_id in present_days:
-                present_days[s_id].add(record.get('date'))
+            if s_id not in attendance_punches:
+                attendance_punches[s_id] = []
+            attendance_punches[s_id].append(record)
     except Exception as e:
         return Response({"error": f"Failed to retrieve attendance records: {e}"}, status=500)
 
-    # --- 3. Generate the structured salary report ---
+    # 3. Process data for each staff member
     salary_report_list = []
-    start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-    end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-    total_days_in_period = (end_date - start_date).days + 1
     
     for s_id, details in staff_details.items():
-        days_present = len(present_days.get(s_id, set()))
-        monthly_salary = details['monthly_salary']
-        
-        # Pro-rata salary calculation
-        if total_days_in_period > 0:
-            daily_rate = monthly_salary / 30 # A simple daily rate calculation
-            salary_due = daily_rate * days_present
-        else:
-            salary_due = 0
+        punches = attendance_punches.get(s_id, [])
+        present_days = set()
+        total_duration = timedelta()
+        clock_in_time = None
 
-        # --- 4. Check if this salary period has already been paid ---
+        for punch in punches:
+            present_days.add(punch.get('date'))
+            punch_time = datetime.fromisoformat(punch['timestamp'])
+            punch_type = punch['punch_type']
+
+            if punch_type == 'clock_in':
+                clock_in_time = punch_time
+            elif punch_type == 'clock_out' and clock_in_time:
+                total_duration += punch_time - clock_in_time
+                clock_in_time = None
+        
+        days_present = len(present_days)
+        total_hours_worked = total_duration.total_seconds() / 3600
+        daily_salary = float(details.get('salary', 0.0))
+        salary_due = daily_salary * days_present
+
+        # 4. Check if this salary period has already been paid
         payment_doc_id = f"{s_id}_{start_date_str}_{end_date_str}"
-        payment_ref = db.collection('salary_payments').document(payment_doc_id)
-        payment_doc = payment_ref.get()
+        payment_doc = db.collection('salary_payments').document(payment_doc_id).get()
 
         salary_report_list.append({
             "staff_id": s_id,
-            "staff_name": details["name"],
+            "staff_name": details.get("name", "Unknown"),
             "total_days_present": days_present,
+            "total_hours_worked": round(total_hours_worked, 2), # New field
             "total_salary_due": round(salary_due, 2),
-            "is_paid": payment_doc.exists # is_paid is true if a payment record exists
+            "is_paid": payment_doc.exists
         })
         
     return Response(salary_report_list, status=status.HTTP_200_OK)
