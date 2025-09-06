@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        /* --- UPDATED THEME --- */
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #FFF8F1; /* Matching POS background */
+        }
+        .modal-bg { 
+            background-color: rgba(0,0,0,0.5); 
+        }
+        input, select {
+            border: 1px solid #D1D5DB; /* gray-300 */
+            border-radius: 0.5rem; /* rounded-lg */
+            padding: 0.75rem;
+            width: 100%;
+            transition: all 0.2s;
+            background-color: #FFFFFF;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #8A0F0F;  
+            box-shadow: 0 0 0 2px #FBCFE8; /* Softer pink-200 focus ring */
+        }
+        .search-input-container { 
+            position: relative; 
+        }
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .btn-primary { 
+            background-color: #6A0B0B; 
+            color: white; 
+        }
+        .btn-primary:hover { 
+            background-color: #8A0F0F; 
+        }
+        .btn-secondary { 
+            background-color: #f3f4f6; /* Matching POS secondary button */
+            color: #4A4A4A; 
+            border: 1px solid #e5e7eb;
+        }
+        .btn-secondary:hover { 
+            background-color: #e5e7eb; 
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto bg-white rounded-2xl shadow-lg p-6 md:p-8">
+        
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-[#6A0B0B]">Product Management</h1>
+            <p class="text-gray-500 mt-2">Add, edit, and manage all products for your outlets.</p>
+        </div>
+
+        <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+            <div class="search-input-container w-full md:w-1/3">
+                <input type="text" id="product-search" placeholder="Search products..." class="pl-10">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+            </div>
+            <button onclick="showProductModal()" class="btn btn-primary w-full md:w-auto">
+                <i class="fas fa-plus mr-2"></i>Add New Product
+            </button>
+        </div>
+
+        <div id="products-list" class="space-y-3">
+            <!-- Products will be dynamically loaded here -->
+             <div class="text-center py-12">
+                <div class="inline-block border-4 border-gray-200 border-t-4 border-t-[#6A0B0B] rounded-full w-12 h-12 animate-spin"></div>
+                <p class="mt-4 text-gray-500">Loading Products...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Add/Edit Product -->
+    <div id="product-modal" class="modal-bg hidden fixed inset-0 z-50 flex items-center justify-center p-4"></div>
+    
+    <!-- Notifications -->
+    <div id="notification" class="hidden fixed top-5 right-5 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50"></div>
+    <div id="error-notification" class="hidden fixed top-5 right-5 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg z-50"></div>
+
+    <script>
+        // --- UPDATED API URL ---
+        const API_BASE_URL = 'https://web-production-b7e2a.up.railway.app';
+        const PRODUCTS_URL = `${API_BASE_URL}/items/manage-products/`;
+        const UPLOAD_IMAGE_URL = `${API_BASE_URL}/items/upload-image/`;
+        const GENERATE_BARCODE_URL = `${API_BASE_URL}/items/generate-barcode/`;
+
+        let allProducts = [];
+
+        function showNotification(message, isError = false) {
+            const el = isError ? document.getElementById('error-notification') : document.getElementById('notification');
+            el.textContent = message;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 3000);
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+        }
+
+        async function fetchProducts() {
+            try {
+                const response = await fetch(PRODUCTS_URL);
+                if (!response.ok) throw new Error('Failed to fetch products');
+                allProducts = await response.json();
+                renderProducts();
+            } catch (e) {
+                showNotification(`Error loading products: ${e.message}`, true);
+                document.getElementById('products-list').innerHTML = `<p class="text-red-500 text-center py-8">Could not load products. Please try again later.</p>`;
+            }
+        }
+
+        function renderProducts(filterQuery = '') {
+            const listEl = document.getElementById('products-list');
+            const filtered = allProducts.filter(p => p.name.toLowerCase().includes(filterQuery.toLowerCase()));
+
+            if (filtered.length === 0) {
+                listEl.innerHTML = '<p class="text-gray-500 text-center py-8">No products found.</p>';
+                return;
+            }
+            
+            listEl.innerHTML = filtered.map(product => {
+                const isWholesale = product.type === 'wholesale';
+                
+                return `
+                <div class="bg-gray-50 border rounded-lg p-4 flex items-center justify-between flex-wrap gap-4">
+                    <div class="flex items-center gap-4 flex-1 min-w-[250px]">
+                        <img src="${product.image_url || 'https://placehold.co/64x64/FFF8F1/6A0B0B?text=Img'}" alt="${product.name}" class="w-16 h-16 rounded-md object-cover">
+                        <div>
+                            <p class="font-bold text-lg text-gray-800">
+                                ${product.name} 
+                                <span class="text-xs font-semibold px-2 py-1 rounded-full ${isWholesale ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}">${_toTitleCase(product.type || 'N/A')}</span>
+                            </p>
+                            <p class="text-sm text-gray-700">
+                                <span class="font-semibold">Selling Price:</span> <span class="text-green-600 font-bold">₹${(product.price || 0).toFixed(2)}</span>
+                                ${isWholesale ? `| <span class="font-semibold">Cost Price:</span> <span class="text-red-600 font-bold">₹${(product.cost_price || 0).toFixed(2)}</span>` : ''}
+                            </p>
+                             <p class="text-sm text-gray-700">
+                                <span class="font-semibold">Stock:</span> ${product.stock} ${_toTitleCase(product.unit_type || 'piece')}
+                            </p>
+                            <p class="text-xs text-gray-500">Barcode: ${product.barcode || 'N/A'}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center">
+                        <button onclick="showProductModal('${product.id}')" class="text-blue-600 hover:text-blue-800 mr-4" title="Edit Product"><i class="fas fa-edit fa-lg"></i></button>
+                        <button onclick="deleteProduct('${product.id}', '${product.name}')" class="text-red-600 hover:text-red-800" title="Delete Product"><i class="fas fa-trash fa-lg"></i></button>
+                    </div>
+                </div>
+                `}).join('');
+        }
+
+        function _toTitleCase(str) {
+            if (!str) return '';
+            return str.replace(/_/g, ' ').replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+        }
+
+        async function showProductModal(id = null) {
+            const product = id ? allProducts.find(p => p.id === id) : null;
+            const modalEl = document.getElementById('product-modal');
+            const onsubmitCall = id ? `saveProduct('${id}')` : `saveProduct(null)`;
+
+            modalEl.innerHTML = `
+                <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <h3 class="text-2xl font-bold mb-6">${id ? 'Edit' : 'Add'} Product</h3>
+                    <form onsubmit="event.preventDefault(); ${onsubmitCall}" class="space-y-4">
+                        
+                        <div class="flex items-center gap-4">
+                            <img id="image-preview" src="${product?.image_url || 'https://placehold.co/100/FFF8F1/6A0B0B?text=Upload'}" class="w-24 h-24 rounded-full object-cover border-4 border-gray-200">
+                            <div>
+                                <label for="image-upload" class="btn btn-secondary cursor-pointer">
+                                    <i class="fas fa-upload mr-2"></i> Upload Image
+                                </label>
+                                <input type="file" id="image-upload" class="hidden" accept="image/*" onchange="previewImage(event)">
+                            </div>
+                        </div>
+
+                        <div class="grid md:grid-cols-2 gap-4">
+                            <input id="prod-name" type="text" placeholder="Product Name" value="${product?.name || ''}" required>
+                            <input id="prod-price" type="number" step="0.01" placeholder="Selling Price" value="${product?.price || ''}" required>
+                        </div>
+                        <div class="grid md:grid-cols-2 gap-4">
+                            <input id="prod-stock" type="number" placeholder="Stock" value="${product?.stock || ''}" required>
+                            <input id="prod-threshold" type="number" placeholder="Low Stock Threshold" value="${product?.low_stock_threshold || '10'}" required>
+                        </div>
+                        <div class="relative">
+                             <input id="prod-barcode" type="text" placeholder="Barcode" value="${product?.barcode || ''}">
+                             <button type="button" onclick="generateBarcode()" class="absolute right-2 top-1/2 -translate-y-1/2 bg-gray-200 px-3 py-1 rounded text-sm font-semibold text-gray-700 hover:bg-gray-300">Generate</button>
+                        </div>
+                        <div class="grid md:grid-cols-2 gap-4">
+                             <select id="prod-unit-type">
+                                 <option value="piece" ${product?.unit_type === 'piece' ? 'selected' : ''}>Per Piece</option>
+                                 <option value="kg" ${product?.unit_type === 'kg' ? 'selected' : ''}>Per Kg</option>
+                             </select>
+                             <select id="prod-type" onchange="toggleCostPrice(this.value)">
+                                 <option value="production" ${product?.type === 'production' ? 'selected' : ''}>Production (Made In-House)</option>
+                                 <option value="wholesale" ${product?.type === 'wholesale' ? 'selected' : ''}>Wholesale (Bought & Resold)</option>
+                             </select>
+                        </div>
+                        <div id="cost-price-container" class="${product?.type === 'wholesale' ? '' : 'hidden'}">
+                            <label for="prod-cost-price" class="block text-sm font-medium text-gray-700">Cost Price (Purchase Price)</label>
+                            <input id="prod-cost-price" type="number" step="0.01" placeholder="Cost Price" value="${product?.cost_price || ''}">
+                        </div>
+
+                        <div class="flex justify-end space-x-4 pt-4">
+                            <button type="button" onclick="closeModal('product-modal')" class="btn btn-secondary">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Save Product</button>
+                        </div>
+                    </form>
+                </div>`;
+            modalEl.classList.remove('hidden');
+        }
+
+        function previewImage(event) {
+            const reader = new FileReader();
+            reader.onload = function() {
+                const preview = document.getElementById('image-preview');
+                preview.src = reader.result;
+            }
+            reader.readAsDataURL(event.target.files[0]);
+        }
+
+        function toggleCostPrice(type) {
+            document.getElementById('cost-price-container').classList.toggle('hidden', type !== 'wholesale');
+        }
+        
+        async function generateBarcode() {
+            try {
+                const response = await fetch(GENERATE_BARCODE_URL);
+                const data = await response.json();
+                if (response.ok) {
+                    document.getElementById('prod-barcode').value = data.barcode;
+                } else {
+                    throw new Error(data.error || 'Failed to generate barcode');
+                }
+            } catch(e) {
+                showNotification(e.message, true);
+            }
+        }
+
+        async function saveProduct(id) {
+            const imageFile = document.getElementById('image-upload').files[0];
+            let imageUrl = id ? allProducts.find(p => p.id === id)?.image_url : null;
+
+            if (imageFile) {
+                const formData = new FormData();
+                formData.append('file', imageFile);
+                try {
+                    const response = await fetch(UPLOAD_IMAGE_URL, { method: 'POST', body: formData });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || 'Image upload failed');
+                    imageUrl = result.image_url;
+                } catch (e) {
+                    showNotification(e.message, true);
+                    return;
+                }
+            }
+
+            const productType = document.getElementById('prod-type').value;
+            const productData = {
+                name: document.getElementById('prod-name').value,
+                price: parseFloat(document.getElementById('prod-price').value),
+                stock: parseInt(document.getElementById('prod-stock').value),
+                low_stock_threshold: parseInt(document.getElementById('prod-threshold').value),
+                barcode: document.getElementById('prod-barcode').value,
+                unit_type: document.getElementById('prod-unit-type').value,
+                type: productType,
+                cost_price: productType === 'wholesale' ? parseFloat(document.getElementById('prod-cost-price').value) : 0,
+                image_url: imageUrl || '',
+            };
+
+            const url = id ? `${PRODUCTS_URL}${id}/` : PRODUCTS_URL;
+            const method = id ? 'PUT' : 'POST';
+
+            try {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(productData),
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to save product');
+                }
+                showNotification('Product saved successfully!');
+                closeModal('product-modal');
+                fetchProducts();
+            } catch (e) {
+                showNotification(e.message, true);
+            }
+        }
+
+        async function deleteProduct(id, name) {
+            if (!confirm(`Are you sure you want to delete "${name}"?`)) return;
+            try {
+                const response = await fetch(`${PRODUCTS_URL}${id}/`, { method: 'DELETE' });
+                if (!response.ok) throw new Error('Server failed to delete product');
+                showNotification('Product deleted successfully!');
+                fetchProducts();
+            } catch(e) {
+                showNotification(e.message, true);
+            }
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchProducts();
+            document.getElementById('product-search').addEventListener('input', (e) => renderProducts(e.target.value));
+        });
+    </script>
+</body>
+</html>

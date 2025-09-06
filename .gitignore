@@ -21,3 +21,9 @@ db.sqlite3
 
 # Firebase Credentials (IMPORTANT)
 serviceAccountKey.json
+ownerbot_frontend/
+bakery_billing_app/
+config/
+video/
+
+config/service_account_key.json

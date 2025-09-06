@@ -3,712 +3,641 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bakery Billing System</title>
-    <!-- Tailwind CSS CDN -->
+    <title>Asthana Bakery POS</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <!-- Font Awesome for icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #fdfaf6; /* Light cream background */
+            background-color: #FFF8F1;
+            color: #4A4A4A;
         }
-        /* Custom scrollbar for better aesthetics */
+        .main-header {
+            background-color: #6A0B0B;
+            color: white;
+        }
+        .btn-primary {
+            background-color: #6A0B0B;
+            color: white;
+            transition: background-color 0.3s;
+        }
+        .btn-primary:hover {
+            background-color: #8A0F0F;
+        }
+        .btn-secondary {
+            background-color: #f3f4f6;
+            color: #4A4A4A;
+            transition: background-color 0.3s;
+        }
+        .btn-secondary:hover {
+            background-color: #e5e7eb;
+        }
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        .product-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .product-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .disabled-card {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #6A0B0B;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Custom scrollbar for webkit browsers */
         ::-webkit-scrollbar {
             width: 8px;
         }
         ::-webkit-scrollbar-track {
             background: #f1f1f1;
-            border-radius: 10px;
         }
         ::-webkit-scrollbar-thumb {
-            background: #f97316; /* Deep orange */
-            border-radius: 10px;
+            background: #888;
+            border-radius: 4px;
         }
         ::-webkit-scrollbar-thumb:hover {
-            background: #ea580c; /* Darker orange */
+            background: #555;
         }
-        .modal {
-            display: none; /* Hidden by default */
-            position: fixed; /* Stay in place */
-            z-index: 1000; /* Sit on top */
-            left: 0;
-            top: 0;
-            width: 100%; /* Full width */
-            height: 100%; /* Full height */
-            overflow: auto; /* Enable scroll if needed */
-            background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
-            justify-content: center;
-            align-items: center;
+        /* Styles for mobile cart overlay */
+        #cart-section.mobile-overlay {
+            transform: translateX(100%);
+            transition: transform 0.3s ease-in-out;
         }
-        .modal-content {
-            background-color: #fefefe;
-            margin: auto;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            width: 90%;
-            max-width: 500px;
-        }
-        .close-button {
-            color: #aaa;
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
-        }
-        .close-button:hover,
-        .close-button:focus {
-            color: black;
-            text-decoration: none;
-            cursor: pointer;
-        }
-        /* Styles for the QR scanner video feed */
-        #reader video {
-            width: 100% !important;
-            height: auto !important;
-            object-fit: cover;
-            border-radius: 8px;
-        }
-        #reader__dashboard_section { /* Hide default dashboard if not needed */
-            display: none;
-        }
-        @media print {
-            body * {
-                visibility: hidden;
-            }
-            #print-area, #print-area * {
-                visibility: visible;
-            }
-            #print-area {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
-                padding: 20px;
-                box-sizing: border-box;
-            }
+        #cart-section.mobile-overlay.active {
+            transform: translateX(0);
         }
     </style>
 </head>
-<body class="bg-orange-50 min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-    <div class="max-w-4xl w-full bg-white shadow-xl rounded-xl p-8 space-y-8">
-        <div class="text-center">
-            <h2 class="mt-6 text-4xl font-extrabold text-orange-700 tracking-tight">
-                Bakery POS
-            </h2>
-            <p class="mt-2 text-sm text-gray-600">
-                Process sales and manage inventory for your bakery outlets.
-            </p>
-        </div>
+<body class="antialiased">
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <!-- Product Selection Section -->
-            <div class="bg-gray-50 p-6 rounded-lg shadow-inner">
-                <h3 class="text-2xl font-semibold text-gray-800 mb-6">Products</h3>
-                <div class="mb-4 flex space-x-2">
-                    <button id="addProductBtn" class="flex-1 px-4 py-2 bg-green-500 text-white font-semibold rounded-md hover:bg-green-600 transition-colors">
-                        <i class="fas fa-plus mr-2"></i>Add New Product
-                    </button>
-                    <button id="scanProductBtn" class="flex-1 px-4 py-2 bg-blue-500 text-white font-semibold rounded-md hover:bg-blue-600 transition-colors">
-                        <i class="fas fa-qrcode mr-2"></i>Scan Product QR
-                    </button>
-                </div>
-                <div id="products-list" class="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    <!-- Products will be dynamically loaded here -->
-                </div>
+    <div id="app" class="h-screen w-screen flex flex-col">
+        <header class="main-header shadow-md p-3 flex justify-between items-center z-20">
+            <h1 class="text-xl font-bold">Asthana Bakery POS</h1>
+            <div class="text-sm">
+                <span id="outlet-display" class="font-semibold">No Outlet</span> | 
+                <span id="staff-display">No Staff</span>
             </div>
+        </header>
 
-            <!-- Cart and Billing Section -->
-            <div class="bg-gray-50 p-6 rounded-lg shadow-inner flex flex-col">
-                <h3 class="text-2xl font-semibold text-gray-800 mb-6">Current Order</h3>
-                <div id="cart-items" class="flex-grow overflow-y-auto max-h-96 pr-2">
-                    <!-- Cart items will be dynamically added here -->
-                    <p id="empty-cart-message" class="text-gray-500 text-center py-4">No items in cart yet.</p>
+        <main id="main-content" class="flex-1 overflow-hidden hidden relative">
+            <div class="flex h-full">
+                <div class="flex-1 flex flex-col p-4">
+                    <div class="mb-4">
+                        <input type="text" id="search-bar" placeholder="Search for products..." class="w-full p-3 rounded-lg border focus:ring-2 focus:ring-[#8A0F0F] focus:outline-none shadow-sm">
+                    </div>
+                    <div id="product-grid" class="flex-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 overflow-y-auto pb-4 pr-2">
+                        </div>
                 </div>
-                <div class="border-t-2 border-orange-200 pt-4 mt-6">
-                    <div class="flex justify-between items-center text-xl font-bold text-gray-800">
-                        <span>Total:</span>
-                        <span id="total-amount">$0.00</span>
+
+                <div id="cart-section" class="w-full md:w-96 bg-white shadow-lg flex-col border-l border-gray-200 hidden md:flex">
+                    <div class="p-4 border-b flex justify-between items-center">
+                        <h2 class="text-2xl font-bold text-gray-800">Current Bill</h2>
+                         <button id="close-cart-btn" class="md:hidden text-gray-500 hover:text-gray-800">
+                              <i class="fa-solid fa-times fa-lg"></i>
+                         </button>
                     </div>
-                    <div class="mt-4">
-                        <label for="outlet-select" class="block text-sm font-medium text-gray-700 mb-2">Select Outlet:</label>
-                        <select id="outlet-select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md shadow-sm">
-                            <option value="outlet_1">Outlet 1</option>
-                            <option value="outlet_2">Outlet 2</option>
-                            <option value="outlet_3">Outlet 3</option>
-                        </select>
+                    <div id="cart-items" class="flex-1 overflow-y-auto p-2">
+                        <div id="cart-placeholder" class="h-full flex flex-col items-center justify-center text-gray-400">
+                            <i class="fa-solid fa-cart-shopping fa-3x mb-4"></i>
+                            <p>Your cart is empty</p>
+                        </div>
                     </div>
-                    <div class="mt-4">
-                        <label for="customerId" class="block text-sm font-medium text-gray-700 mb-2">Customer ID (Optional):</label>
-                        <input type="text" id="customerId" placeholder="Leave empty for anonymous" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
-                    </div>
-                    <div class="mt-4">
-                        <label for="paymentStatus" class="block text-sm font-medium text-gray-700 mb-2">Payment Status:</label>
-                        <select id="paymentStatus" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md shadow-sm">
-                            <option value="Paid">Paid</option>
-                            <option value="Pending">Pending</option>
-                            <option value="Refunded">Refunded</option>
-                        </select>
-                    </div>
-                    <div class="mt-6 grid grid-cols-2 gap-4">
-                        <button id="printReceiptBtn" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-orange-600 bg-white border-orange-600 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition duration-150 ease-in-out">
-                            <i class="fas fa-print mr-2"></i>Print Receipt
+                    <div class="p-4 bg-gray-50 border-t mt-auto">
+                        <div class="flex justify-between items-center text-xl font-bold mb-4">
+                            <span>Total</span>
+                            <span id="cart-total">₹0.00</span>
+                        </div>
+                        <button id="complete-sale-btn" class="w-full btn-primary font-bold py-3 rounded-lg disabled:opacity-50" disabled>
+                            Complete Sale
                         </button>
-                        <button id="checkout-button" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition duration-150 ease-in-out">
-                            Process Sale
-                        </button>
+                         <div class="flex space-x-2 mt-2">
+                              <button id="print-bill-btn" class="w-1/2 btn-secondary font-bold py-2 rounded-lg disabled:opacity-50" disabled>Print Bill</button>
+                              <button id="reprint-bill-btn" class="w-1/2 btn-secondary font-bold py-2 rounded-lg">Reprint Bill</button>
+                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-
-        <!-- Add Product Modal -->
-        <div id="addProductModal" class="modal">
-            <div class="modal-content">
-                <span class="close-button" data-modal="addProductModal">&times;</span>
-                <h3 class="text-2xl font-semibold text-gray-800 mb-6">Add New Product</h3>
-                <div class="space-y-4">
-                    <div>
-                        <label for="newProductName" class="block text-sm font-medium text-gray-700">Product Name</label>
-                        <input type="text" id="newProductName" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
-                    </div>
-                    <div>
-                        <label for="newProductPrice" class="block text-sm font-medium text-gray-700">Price</label>
-                        <input type="number" id="newProductPrice" step="0.01" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
-                    </div>
-                    <div>
-                        <label for="newProductStock" class="block text-sm font-medium text-gray-700">Initial Stock Quantity</label>
-                        <input type="number" id="newProductStock" step="1" min="0" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" value="0">
-                    </div>
-                    <div>
-                        <label for="newProductImg" class="block text-sm font-medium text-gray-700">Image URL (or Emoji text)</label>
-                        <input type="text" id="newProductImg" placeholder="e.g., https://placehold.co/100x100/FFF?text=🍞 or 🍞" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
-                    </div>
-                    <button id="saveNewProductBtn" class="w-full py-2 px-4 bg-orange-600 text-white rounded-md hover:bg-orange-700">Save Product</button>
+             <button id="mobile-cart-btn" class="md:hidden fixed bottom-6 right-6 btn-primary rounded-full shadow-lg px-4 py-3 flex items-center space-x-2">
+                <i class="fa-solid fa-receipt"></i>
+                <span id="mobile-cart-info">View Bill</span>
+            </button>
+        </main>
+        
+        <div id="loading-overlay" class="absolute inset-0 bg-white flex flex-col items-center justify-center z-50">
+            <div id="loader-spinner" class="loader"></div>
+            <p id="loading-text" class="mt-4 text-lg font-medium">Initializing...</p>
+            <div id="setup-section" class="hidden mt-6 text-center">
+                <h2 class="text-2xl font-bold mb-4">Bakery Setup</h2>
+                <div class="w-72 mx-auto">
+                    <select id="outlet-select" class="w-full p-3 border rounded-lg mb-4 hidden"></select>
+                    <select id="staff-select" class="w-full p-3 border rounded-lg mb-4 hidden"></select>
+                    <button id="confirm-setup-btn" class="w-full btn-primary font-bold py-3 rounded-lg hidden">Confirm Selection</button>
                 </div>
+                <p id="setup-error" class="text-red-500 mt-4"></p>
+                <button id="retry-btn" class="mt-4 w-72 btn-primary font-bold py-3 rounded-lg hidden">Retry Connection</button>
             </div>
         </div>
 
-        <!-- QR Scanner Modal -->
-        <div id="qrScannerModal" class="modal">
-            <div class="modal-content">
-                <span class="close-button" data-modal="qrScannerModal">&times;</span>
-                <h3 class="text-2xl font-semibold text-gray-800 mb-6">Scan Product QR Code</h3>
-                <div id="reader" class="w-full h-64 border border-gray-300 rounded-md overflow-hidden flex justify-center items-center">
-                    <!-- QR scanner video feed will appear here -->
-                </div>
-                <div id="qr-result" class="mt-4 text-center text-lg font-semibold text-gray-700">Scan result: None</div>
-            </div>
-        </div>
-
-        <!-- Notification/Success Message -->
-        <div id="notification" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg text-center text-lg z-50">
-            Sale Processed Successfully!
-        </div>
-        <div id="error-notification" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg text-center text-lg z-50">
-            Error Processing Sale!
-        </div>
     </div>
 
-    <!-- HTML5-QRCODE Library -->
-    <script src="https://unpkg.com/html5-qrcode/minified/html5-qrcode.min.js"></script>
+    <div id="modal-container"></div>
+    
+    <div id="snackbar" class="fixed bottom-5 right-5 bg-gray-800 text-white py-3 px-5 rounded-lg shadow-lg opacity-0 transition-opacity duration-300 z-50">
+        Message
+    </div>
 
     <script>
-        // API Endpoints
-        const SALES_API_URL = 'http://192.168.1.3:8000/sales/record-sale/'; 
-        // Need a new endpoint in Django to get/add/update products in the 'items' collection
-        const PRODUCTS_API_URL = 'http://192.168.1.3:8000/items/manage-products/'; // We will create this!
+        document.addEventListener('DOMContentLoaded', () => {
+            const app = {
+                API_BASE_URL: 'https://web-production-b7e2a.up.railway.app',
 
-        // Products will now be loaded from Firestore
-        let products = []; // This will be populated from API
-        let cart = {}; // { itemId: { name, price, quantity, img, stock } }
+                // State
+                outlets: [],
+                staff: [],
+                products: [],
+                cart: {}, // Use an object for easy item management by ID
+                selectedOutlet: null,
+                selectedStaff: null,
 
-        // DOM Elements
-        const productsListDiv = document.getElementById('products-list');
-        const cartItemsDiv = document.getElementById('cart-items');
-        const totalAmountSpan = document.getElementById('total-amount');
-        const emptyCartMessage = document.getElementById('empty-cart-message');
-        const checkoutButton = document.getElementById('checkout-button');
-        const outletSelect = document.getElementById('outlet-select');
-        const notification = document.getElementById('notification');
-        const errorNotification = document.getElementById('error-notification');
-        const printReceiptBtn = document.getElementById('printReceiptBtn');
+                // DOM Elements
+                elements: {
+                    loaderSpinner: document.getElementById('loader-spinner'),
+                    loadingOverlay: document.getElementById('loading-overlay'),
+                    loadingText: document.getElementById('loading-text'),
+                    setupSection: document.getElementById('setup-section'),
+                    outletSelect: document.getElementById('outlet-select'),
+                    staffSelect: document.getElementById('staff-select'),
+                    confirmSetupBtn: document.getElementById('confirm-setup-btn'),
+                    setupError: document.getElementById('setup-error'),
+                    retryBtn: document.getElementById('retry-btn'),
+                    mainContent: document.getElementById('main-content'),
+                    outletDisplay: document.getElementById('outlet-display'),
+                    staffDisplay: document.getElementById('staff-display'),
+                    productGrid: document.getElementById('product-grid'),
+                    searchBar: document.getElementById('search-bar'),
+                    cartSection: document.getElementById('cart-section'),
+                    cartItems: document.getElementById('cart-items'),
+                    cartPlaceholder: document.getElementById('cart-placeholder'),
+                    cartTotal: document.getElementById('cart-total'),
+                    completeSaleBtn: document.getElementById('complete-sale-btn'),
+                    printBillBtn: document.getElementById('print-bill-btn'),
+                    reprintBillBtn: document.getElementById('reprint-bill-btn'),
+                    modalContainer: document.getElementById('modal-container'),
+                    snackbar: document.getElementById('snackbar'),
+                    mobileCartBtn: document.getElementById('mobile-cart-btn'),
+                    mobileCartInfo: document.getElementById('mobile-cart-info'),
+                    closeCartBtn: document.getElementById('close-cart-btn'),
+                },
 
-        // NEW: Customer and Payment DOM Elements
-        const customerIdInput = document.getElementById('customerId');
-        const paymentStatusSelect = document.getElementById('paymentStatus');
+                init() {
+                    this.elements.searchBar.addEventListener('input', () => this.renderProducts());
+                    this.elements.confirmSetupBtn.addEventListener('click', () => this.confirmSetup());
+                    this.elements.completeSaleBtn.addEventListener('click', () => this.processSale());
+                    this.elements.printBillBtn.addEventListener('click', () => this.printBill(this.getCartAsArray(), null));
+                    this.elements.reprintBillBtn.addEventListener('click', () => this.promptForReprint());
+                    this.elements.mobileCartBtn.addEventListener('click', () => this.showMobileCart());
+                    this.elements.closeCartBtn.addEventListener('click', () => this.hideMobileCart());
+                    this.elements.retryBtn.addEventListener('click', () => this.startSetup());
+                    
+                    this.handleResize();
+                    window.addEventListener('resize', () => this.handleResize());
+                    this.startSetup();
+                },
 
-        // Modals and their buttons
-        const addProductBtn = document.getElementById('addProductBtn');
-        const addProductModal = document.getElementById('addProductModal');
-        const closeButtons = document.querySelectorAll('.close-button');
-        const newProductNameInput = document.getElementById('newProductName');
-        const newProductPriceInput = document.getElementById('newProductPrice');
-        const newProductStockInput = document.getElementById('newProductStock'); // New input for initial stock
-        const newProductImgInput = document.getElementById('newProductImg');
-        const saveNewProductBtn = document.getElementById('saveNewProductBtn');
+                // --- SETUP FLOW ---
+                async startSetup() {
+                    // Reset UI to initial loading state
+                    this.elements.loaderSpinner.classList.remove('hidden');
+                    this.elements.loadingText.classList.remove('hidden');
+                    this.setLoadingText("Initializing...");
+                    this.elements.setupError.textContent = '';
+                    this.elements.retryBtn.classList.add('hidden');
+                    this.elements.outletSelect.classList.add('hidden');
+                    this.elements.staffSelect.classList.add('hidden');
+                    this.elements.confirmSetupBtn.classList.add('hidden');
+                    this.elements.setupSection.classList.add('hidden');
 
-        const scanProductBtn = document.getElementById('scanProductBtn');
-        const qrScannerModal = document.getElementById('qrScannerModal');
-        const qrResultDiv = document.getElementById('qr-result');
-        let html5QrCode = null;
-
-        // Helper to generate unique product ID (Firestore document ID) - can be product_name or a barcode
-        function generateProductId(name) {
-            return name.toLowerCase().replace(/\s+/g, '_'); // Simple slug for ID for now
-        }
-
-        // --- API Calls to Django Backend for Products ---
-        async function fetchProducts() {
-            try {
-                const response = await fetch(PRODUCTS_API_URL, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                if (response.ok) {
-                    products = await response.json();
-                    console.log('Products loaded from backend:', products);
-                    renderProducts();
-                } else {
-                    const errorData = await response.json();
-                    console.error('Failed to fetch products:', errorData);
-                    showNotification(errorNotification);
-                    errorNotification.textContent = `Error loading products: ${errorData.error || 'Unknown'}`;
-                }
-            } catch (error) {
-                console.error('Network error fetching products:', error);
-                showNotification(errorNotification);
-                errorNotification.textContent = `Network error: Could not load products. Please ensure Django server is running and 'items' app is configured correctly.`; // Improved error message
-            }
-        }
-
-        async function saveNewProductToBackend(productData) {
-            try {
-                const response = await fetch(PRODUCTS_API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(productData)
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('Product saved to backend:', data);
-                    showNotification(notification);
-                    notification.textContent = `Product '${productData.name}' saved!`;
-                    await fetchProducts(); // Refresh products list from backend
-                    return true;
-                } else {
-                    const errorData = await response.json();
-                    console.error('Failed to save product:', errorData);
-                    showNotification(errorNotification);
-                    errorNotification.textContent = `Error saving product: ${errorData.error || 'Unknown'}`;
-                    return false;
-                }
-            } catch (error) {
-                console.error('Network error saving product:', error);
-                showNotification(errorNotification);
-                errorNotification.textContent = `Network error: Could not save product.`;
-                return false;
-            }
-        }
-
-        // Render products
-        function renderProducts() {
-            productsListDiv.innerHTML = '';
-            if (products.length === 0) {
-                productsListDiv.innerHTML = '<p class="text-gray-500 text-center col-span-full py-4">No products found. Add some!</p>';
-            }
-            products.forEach(product => {
-                const isEmoji = product.img && !product.img.startsWith('http') && !product.img.startsWith('data:');
-                const imgSrc = isEmoji ? '' : product.img || 'https://placehold.co/100x100/ccc/white?text=No+Img';
-                const emoji = isEmoji ? `<span class="text-5xl mb-2">${product.img}</span>` : '';
-
-                const productCard = `
-                    <div class="bg-white p-4 rounded-lg shadow-md flex flex-col items-center cursor-pointer hover:shadow-lg transition-all duration-200 transform hover:scale-105" data-id="${product.id}" data-name="${product.name}" data-price="${product.price}" data-stock="${product.stock}">
-                        ${isEmoji ? emoji : `<img src="${imgSrc}" onerror="this.onerror=null;this.src='https://placehold.co/100x100/ccc/white?text=Img+Error';" alt="${product.name}" class="w-16 h-16 object-cover rounded-full mb-2 border-2 border-orange-300">`}
-                        <p class="text-lg font-semibold text-gray-800">${product.name}</p>
-                        <p class="text-sm text-gray-600">$${product.price.toFixed(2)}</p>
-                        <p class="text-xs text-gray-500">Stock: ${product.stock !== undefined ? product.stock : 'N/A'}</p>
-                        <button class="mt-3 px-4 py-2 bg-orange-500 text-white text-sm font-semibold rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 add-to-cart-btn">Add</button>
-                    </div>
-                `;
-                productsListDiv.innerHTML += productCard;
-            });
-
-            document.querySelectorAll('.add-to-cart-btn').forEach(button => {
-                button.addEventListener('click', (event) => {
-                    const productCard = event.target.closest('[data-id]');
-                    const productId = productCard.dataset.id;
-                    const productName = productCard.dataset.name;
-                    const productPrice = parseFloat(productCard.dataset.price);
-                    const productStock = parseInt(productCard.dataset.stock); // Get stock from rendered product
-
-                    addToCart(productId, productName, productPrice, productStock);
-                });
-            });
-        }
-
-        // Add item to cart
-        function addToCart(productId, name, price, stock) {
-            if (cart[productId]) {
-                if (cart[productId].quantity < stock || stock === undefined || stock === null) { // Allow adding if stock is sufficient or not tracked
-                    cart[productId].quantity++;
-                } else {
-                    showNotification(errorNotification);
-                    errorNotification.textContent = `Cannot add more ${name}. Out of stock!`;
-                    return;
-                }
-            } else {
-                if (stock > 0 || stock === undefined || stock === null) { // Allow adding if stock is available or not tracked
-                    const product = products.find(p => p.id === productId);
-                    if (product) {
-                        cart[productId] = { ...product, quantity: 1 };
-                    } else {
-                        // This case should ideally not happen if products are loaded from backend
-                        showNotification(errorNotification);
-                        errorNotification.textContent = `Product with ID "${productId}" not found.`;
+                    if (!navigator.onLine) {
+                        this.showSetupError("No internet connection. Please check your network.");
                         return;
                     }
-                } else {
-                    showNotification(errorNotification);
-                    errorNotification.textContent = `${name} is out of stock!`;
-                    return;
-                }
-            }
-            renderCart();
-        }
+                    await this.fetchOutlets();
+                },
 
-        // Adjust quantity in cart
-        function adjustQuantity(productId, change) {
-            if (cart[productId]) {
-                const currentStock = products.find(p => p.id === productId)?.stock;
-                if (change > 0 && currentStock !== undefined && currentStock !== null && cart[productId].quantity >= currentStock) {
-                    showNotification(errorNotification);
-                    errorNotification.textContent = `Cannot add more. Out of stock!`;
-                    return;
-                }
-                cart[productId].quantity += change;
-                if (cart[productId].quantity <= 0) {
-                    delete cart[productId];
-                }
-            }
-            renderCart();
-        }
+                async fetchOutlets() {
+                    this.setLoadingText("Fetching Outlets...");
+                    try {
+                        const response = await fetch(`${this.API_BASE_URL}/outlets/manage/`);
+                        if (!response.ok) throw new Error('Failed to load outlets. Please check server status.');
+                        this.outlets = await response.json();
+                        
+                        const salesOutlets = this.outlets;
 
-        // Render cart items
-        function renderCart() {
-            cartItemsDiv.innerHTML = '';
-            let total = 0;
-            const itemIds = Object.keys(cart);
+                        if (salesOutlets.length === 0) {
+                            this.showSetupError("No outlets found. Please configure in the Owner App.");
+                            return;
+                        }
+                        
+                        this.elements.outletSelect.innerHTML = salesOutlets.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+                        this.elements.loadingText.classList.add('hidden');
+                        this.elements.setupSection.classList.remove('hidden');
+                        this.elements.outletSelect.classList.remove('hidden');
 
-            if (itemIds.length === 0) {
-                emptyCartMessage.classList.remove('hidden');
-            } else {
-                emptyCartMessage.classList.add('hidden');
-                itemIds.forEach(productId => {
-                    const item = cart[productId];
-                    const itemTotal = item.price * item.quantity;
-                    total += itemTotal;
+                        await this.fetchStaff();
 
-                    const isEmoji = item.img && !item.img.startsWith('http') && !item.img.startsWith('data:');
-                    const imgSrc = isEmoji ? '' : item.img || 'https://placehold.co/40x40/ccc/white?text=Img';
-                    const emoji = isEmoji ? `<span class="text-3xl mr-3">${item.img}</span>` : '';
+                    } catch (error) {
+                        this.showSetupError(error.message);
+                    }
+                },
 
-                    const cartItemDiv = `
-                        <div class="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm mb-3">
-                            <div class="flex items-center">
-                                ${isEmoji ? emoji : `<img src="${imgSrc}" onerror="this.onerror=null;this.src='https://placehold.co/40x40/ccc/white?text=Img';" alt="${item.name}" class="w-10 h-10 object-cover rounded-full mr-3">`}
-                                <div>
-                                    <p class="text-lg font-medium text-gray-800">${item.name}</p>
-                                    <p class="text-sm text-gray-600">$${item.price.toFixed(2)}</p>
+                async fetchStaff() {
+                    this.setLoadingText("Fetching Staff...");
+                    this.elements.loadingText.classList.remove('hidden');
+                    this.elements.loaderSpinner.classList.remove('hidden');
+                    try {
+                        const response = await fetch(`${this.API_BASE_URL}/staff/list/`);
+                        if (!response.ok) throw new Error('Failed to load staff.');
+                        this.staff = await response.json();
+
+                        if (this.staff.length === 0) {
+                             this.showSetupError("No staff members found. Please add staff in the Owner App.");
+                             return;
+                        }
+                        
+                        this.elements.staffSelect.innerHTML = this.staff.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+                        this.elements.loadingText.classList.add('hidden');
+                        this.elements.loaderSpinner.classList.add('hidden');
+                        this.elements.staffSelect.classList.remove('hidden');
+                        this.elements.confirmSetupBtn.classList.remove('hidden');
+
+                    } catch (error) {
+                        this.showSetupError(error.message);
+                    }
+                },
+
+                confirmSetup() {
+                    const outletId = this.elements.outletSelect.value;
+                    const staffId = this.elements.staffSelect.value;
+                    
+                    this.selectedOutlet = this.outlets.find(o => o.id === outletId);
+                    this.selectedStaff = this.staff.find(s => s.id === staffId);
+                    
+                    if (this.selectedOutlet && this.selectedStaff) {
+                        this.elements.outletDisplay.textContent = this.selectedOutlet.name;
+                        this.elements.staffDisplay.textContent = this.selectedStaff.name;
+                        this.startApplication();
+                    }
+                },
+
+                async startApplication() {
+                    this.elements.loadingOverlay.classList.remove('flex');
+                    this.elements.loadingOverlay.classList.add('hidden');
+                    this.elements.mainContent.classList.remove('hidden');
+                    
+                    this.elements.productGrid.innerHTML = `<div class="col-span-full h-full flex items-center justify-center"><div class="loader"></div></div>`;
+                    
+                    await this.fetchProducts();
+                },
+                
+                async fetchProducts() {
+                    try {
+                        const response = await fetch(`${this.API_BASE_URL}/items/manage-products/`);
+                        if (!response.ok) throw new Error('Failed to load products.');
+                        this.products = await response.json();
+                        this.renderProducts();
+                    } catch (error) {
+                         this.showSnackbar(error.message, true);
+                         this.elements.productGrid.innerHTML = `<div class="col-span-full h-full flex items-center justify-center text-red-500">${error.message}</div>`;
+                    }
+                },
+
+                // =================================================================
+                //  FIX #2: REPLACED WITH BULLETPROOF FUNCTION
+                // =================================================================
+                renderProducts() {
+                    const query = this.elements.searchBar.value.toLowerCase();
+                    
+                    if (!this.products || this.products.length === 0) {
+                        this.elements.productGrid.innerHTML = `<div class="col-span-full h-full flex items-center justify-center text-gray-500">No products available.</div>`;
+                        return;
+                    }
+
+                    const filteredProducts = this.products.filter(p => (p.name || '').toLowerCase().includes(query));
+                    
+                    if (filteredProducts.length === 0) {
+                        this.elements.productGrid.innerHTML = `<div class="col-span-full h-full flex items-center justify-center text-gray-500">No products match your search.</div>`;
+                        return;
+                    }
+
+                    const generatedHTML = filteredProducts.map(product => {
+                        // --- Safer data handling ---
+                        const productName = product.name || 'Unnamed Product';
+                        const productPrice = product.price || 0;
+                        const productStock = product.stock || 0;
+                        const productUnitType = product.unit_type || 'piece';
+                        const isOutOfStock = productUnitType === 'piece' && productStock <= 0;
+                        const cardClass = isOutOfStock ? 'disabled-card' : '';
+                        
+                        // --- Safer image placeholder ---
+                        const firstChar = productName.charAt(0) || '?';
+                        const placeholder = `https://placehold.co/200x200/FFF8F1/6A0B0B?text=${firstChar}`;
+                        const image = product.image_url ? `<img src="${product.image_url}" alt="${productName}" class="w-full h-24 object-cover" onerror="this.onerror=null;this.src='${placeholder}';">` : `<img src="${placeholder}" alt="${productName}" class="w-full h-24 object-cover">`;
+
+                        return `
+                            <div class="product-card bg-white rounded-lg shadow overflow-hidden cursor-pointer ${cardClass}" data-product-id="${product.id}">
+                                ${image}
+                                <div class="p-3 text-center">
+                                    <h3 class="font-semibold text-sm truncate">${productName}</h3>
+                                    <p class="text-xs text-gray-600">₹${productPrice.toFixed(2)} / ${productUnitType === 'kg' ? 'kg' : 'pc'}</p>
                                 </div>
                             </div>
-                            <div class="flex items-center space-x-2">
-                                <button data-id="${item.id}" data-change="-1" class="qty-adjust-btn p-1 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors">
-                                    <i class="fas fa-minus"></i>
-                                </button>
-                                <span class="text-lg font-semibold text-gray-800">${item.quantity}</span>
-                                <button data-id="${item.id}" data-change="+1" class="qty-adjust-btn p-1 rounded-full bg-green-100 text-green-600 hover:bg-green-200 transition-colors">
-                                    <i class="fas fa-plus"></i>
-                                </button>
-                                <span class="text-lg font-semibold text-orange-600">$${itemTotal.toFixed(2)}</span>
-                                <button data-id="${item.id}" class="remove-item-btn p-1 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm6 0a1 1 0 11-2 0v6a1 1 0 112 0V8z" clip-rule="evenodd" />
-                                    </svg>
-                                </button>
+                        `;
+                    }).join('');
+                    
+                    this.elements.productGrid.innerHTML = generatedHTML;
+
+                    // Re-attach event listeners
+                    this.elements.productGrid.querySelectorAll('.product-card:not(.disabled-card)').forEach(card => {
+                        card.addEventListener('click', (e) => {
+                            const productId = e.currentTarget.dataset.productId;
+                            const product = this.products.find(p => p.id === productId);
+                            if (product) {
+                                if (product.unit_type === 'piece') {
+                                    this.showPieceModal(product);
+                                } else {
+                                    this.showWeightModal(product);
+                                }
+                            }
+                        });
+                    });
+                },
+
+                addToCart(product, details) {
+                    const cartId = details.cartId || `${product.id}_${Date.now()}`;
+                    if (product.unit_type === 'piece' && !details.cartId) {
+                        const existingCartId = Object.keys(this.cart).find(id => this.cart[id].product.id === product.id);
+                        if (existingCartId) {
+                            this.cart[existingCartId].quantity += details.quantity;
+                            this.showSnackbar(`${product.name} quantity updated in cart.`);
+                            this.renderCart();
+                            return;
+                        }
+                    }
+                    this.cart[cartId] = { product, ...details };
+                    this.showSnackbar(`${product.name} added to cart.`);
+                    this.renderCart();
+                },
+
+                removeFromCart(cartId) {
+                    delete this.cart[cartId];
+                    this.showSnackbar('Item removed from cart.');
+                    this.renderCart();
+                },
+                
+                renderCart() {
+                    const cartIds = Object.keys(this.cart);
+                    const total = this.getCartTotal();
+
+                    if (cartIds.length === 0) {
+                        this.elements.cartItems.innerHTML = '';
+                        this.elements.cartPlaceholder.classList.remove('hidden');
+                        this.elements.cartTotal.textContent = '₹0.00';
+                        this.elements.mobileCartInfo.textContent = 'View Bill';
+                        this.elements.completeSaleBtn.disabled = true;
+                        this.elements.printBillBtn.disabled = true;
+                        return;
+                    }
+                    
+                    this.elements.cartPlaceholder.classList.add('hidden');
+                    this.elements.cartTotal.textContent = `₹${total.toFixed(2)}`;
+                    this.elements.mobileCartInfo.textContent = `Bill (${cartIds.length}) - ₹${total.toFixed(0)}`;
+                    this.elements.completeSaleBtn.disabled = false;
+                    this.elements.printBillBtn.disabled = false;
+                    
+                    this.elements.cartItems.innerHTML = cartIds.map(cartId => {
+                        const item = this.cart[cartId];
+                        const itemTotal = this.calculateItemTotal(item);
+                        
+                        let subtitle = '';
+                        if (item.quantity) subtitle = `Qty: ${item.quantity} x ₹${(item.product.price || 0).toFixed(2)}`;
+                        if (item.weightGrams) subtitle = `${item.weightGrams}g @ ₹${(item.product.price || 0).toFixed(2)}/kg`;
+
+                        return `
+                            <div class="p-3 mb-2 bg-gray-50 rounded-lg flex items-center justify-between">
+                                <div class="flex-1 mr-2">
+                                    <p class="font-semibold text-sm truncate">${item.product.name}</p>
+                                    <p class="text-xs text-gray-500">${subtitle}</p>
+                                </div>
+                                <div class="text-right">
+                                    <p class="font-bold">₹${itemTotal.toFixed(2)}</p>
+                                     <button class="text-red-500 text-xs hover:underline" data-cart-id="${cartId}">Remove</button>
+                                </div>
                             </div>
-                        </div>
+                        `;
+                    }).join('');
+                    
+                    this.elements.cartItems.querySelectorAll('button').forEach(btn => {
+                        btn.addEventListener('click', (e) => this.removeFromCart(e.currentTarget.dataset.cartId));
+                    });
+                },
+
+                calculateItemTotal(item) {
+                     const price = item.product.price || 0;
+                     if (item.quantity) return price * item.quantity;
+                     if (item.weightGrams) return (price / 1000) * item.weightGrams;
+                     return 0;
+                },
+                
+                async processSale() {
+                    if (Object.keys(this.cart).length === 0) {
+                        this.showSnackbar("Cart is empty.", true);
+                        return;
+                    }
+                    this.showModal(this.createLoadingModal('Processing sale...'));
+                    const saleData = {
+                        items: this.getCartAsArray().map(item => ({
+                            'product_id': item.product.id,
+                            'quantity': item.quantity || 0,
+                            'weight_grams': item.weightGrams || 0,
+                            'total': this.calculateItemTotal(item),
+                            'unit_type': item.product.unit_type
+                        })),
+                        'total_amount': this.getCartTotal(),
+                        'outlet_id': this.selectedOutlet.id,
+                        'staff_id': this.selectedStaff.id
+                    };
+                    try {
+                        const response = await fetch(`${this.API_BASE_URL}/sales/process/`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(saleData)
+                        });
+                        const responseData = await response.json();
+                        if (!response.ok) {
+                            throw new Error(responseData.error || 'Failed to process sale.');
+                        }
+                        this.closeModal();
+                        this.showModal(this.createSaleSuccessModal(responseData.numeric_bill_id));
+                        this.cart = {};
+                        this.renderCart();
+                        this.fetchProducts();
+                    } catch (error) {
+                        this.closeModal();
+                        this.showSnackbar(error.message, true);
+                    }
+                },
+                
+                printBill(items, billId, isReprint = false) {
+                    if (items.length === 0) {
+                        this.showSnackbar("Cannot print an empty bill.", true);
+                        return;
+                    }
+                    const billDate = new Date().toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+                    const total = items.reduce((sum, item) => sum + this.calculateItemTotal(item), 0);
+                    const printContent = `
+                        <style> body { font-family: monospace; font-size: 12px; margin: 0; padding: 10px; } h1, h2, p { margin: 0; } .center { text-align: center; } hr { border: none; border-top: 1px dashed #000; margin: 8px 0; } table { width: 100%; border-collapse: collapse; } th, td { padding: 2px 0; } .right { text-align: right; } .total { font-size: 14px; font-weight: bold; } @media print { @page { margin: 0; } body { margin: 1.6cm; } } </style>
+                        <div class="center"><h1>ASTHANA BAKERY</h1><p>Branch: ${this.selectedOutlet.name}</p><p>Phone: ${this.selectedOutlet.phone || 'N/A'}</p></div><hr><p>Bill No: ${billId || new Date().getTime().toString().slice(-6)}</p><p>Date: ${billDate}</p><p>Billed By: ${this.selectedStaff.name}</p><hr><table><thead><tr><th>Item</th><th class="right">Qty/Wt</th><th class="right">Total</th></tr></thead><tbody>${items.map(item => `<tr><td>${item.product.name}</td><td class="right">${item.quantity || (item.weightGrams + 'g')}</td><td class="right">₹${this.calculateItemTotal(item).toFixed(2)}</td></tr>`).join('')}</tbody></table><hr><p class="total right">TOTAL: ₹${total.toFixed(2)}</p><hr><div class="center"><p>Thank you for your visit!</p></div>
                     `;
-                    cartItemsDiv.innerHTML += cartItemDiv;
-                });
+                    const printWindow = window.open('', '_blank');
+                    printWindow.document.write(printContent);
+                    printWindow.document.close();
+                    printWindow.focus();
+                    setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
+                },
 
-                document.querySelectorAll('.qty-adjust-btn').forEach(button => {
-                    button.addEventListener('click', (event) => {
-                        const productCard = event.target.closest('[data-id]');
-                        const productId = productCard.dataset.id;
-                        const change = parseInt(button.dataset.change);
-                        adjustQuantity(productId, change);
+                async promptForReprint() {
+                     this.showModal(`
+                         <h3 class="text-lg font-bold mb-4">Reprint Bill</h3><p class="mb-2 text-sm text-gray-600">Enter the Bill Number to find and reprint the receipt.</p><input type="number" id="reprint-bill-id" class="w-full p-2 border rounded-lg" placeholder="Enter Bill No."><div class="flex justify-end space-x-2 mt-4"><button class="btn-secondary px-4 py-2 rounded-lg" onclick="app.closeModal()">Cancel</button><button class="btn-primary px-4 py-2 rounded-lg" onclick="app.findAndReprintBill()">Find Bill</button></div>
+                     `);
+                },
+
+                async findAndReprintBill() {
+                    const billId = document.getElementById('reprint-bill-id').value;
+                    if (!billId) {
+                        this.showSnackbar("Please enter a bill number.", true);
+                        return;
+                    }
+                    this.closeModal();
+                    this.showModal(this.createLoadingModal(`Finding bill ${billId}...`));
+                    try {
+                         const response = await fetch(`${this.API_BASE_URL}/sales/find/${billId}/`);
+                         const data = await response.json();
+                         if(!response.ok) throw new Error(data.error || 'Bill not found');
+                         const reprintedItems = data.items.map(itemData => ({ product: { id: itemData.product_id, name: itemData.name || 'Unknown Item', price: (itemData.total / (itemData.quantity || 1)), unit_type: itemData.unit_type }, quantity: itemData.quantity, weightGrams: itemData.weight_grams }));
+                         this.closeModal();
+                         this.printBill(reprintedItems, billId, true);
+                    } catch (error) {
+                        this.closeModal();
+                        this.showSnackbar(error.message, true);
+                    }
+                },
+                
+                setLoadingText(text) {
+                    this.elements.loadingText.textContent = text;
+                },
+                showSetupError(message) {
+                    this.elements.loaderSpinner.classList.add('hidden');
+                    this.elements.loadingText.classList.add('hidden');
+                    this.elements.setupSection.classList.remove('hidden');
+                    this.elements.setupError.textContent = message;
+                    this.elements.retryBtn.classList.remove('hidden');
+                },
+                getCartAsArray() { return Object.values(this.cart); },
+                getCartTotal() { return this.getCartAsArray().reduce((sum, item) => sum + this.calculateItemTotal(item), 0); },
+                showSnackbar(message, isError = false) {
+                    const el = this.elements.snackbar;
+                    el.textContent = message;
+                    el.style.backgroundColor = isError ? '#C53030' : '#2F855A';
+                    el.style.opacity = '1';
+                    setTimeout(() => { el.style.opacity = '0'; }, 3000);
+                },
+                
+                showModal(content) {
+                    this.elements.modalContainer.innerHTML = `<div class="modal-overlay fixed inset-0 z-40 flex items-center justify-center p-4"><div class="modal-content bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">${content}</div></div>`;
+                },
+                closeModal() { this.elements.modalContainer.innerHTML = ''; },
+                showPieceModal(product) {
+                    this.showModal(`<h3 class="text-lg font-bold mb-4">Add ${product.name}</h3><p class="mb-4 text-sm text-gray-600">Price: ₹${(product.price || 0).toFixed(2)} per piece</p><input type="number" id="piece-qty" class="w-full p-2 border rounded-lg" value="1" min="1"><div class="flex justify-end space-x-2 mt-4"><button class="btn-secondary px-4 py-2 rounded-lg" onclick="app.closeModal()">Cancel</button><button class="btn-primary px-4 py-2 rounded-lg" onclick="app.confirmPieceModal('${product.id}')">Add to Cart</button></div>`);
+                    document.getElementById('piece-qty').focus();
+                },
+                confirmPieceModal(productId) {
+                    const product = this.products.find(p => p.id === productId);
+                    const quantity = parseInt(document.getElementById('piece-qty').value, 10);
+                    if (product && quantity > 0) {
+                        this.addToCart(product, { quantity });
+                        this.closeModal();
+                    } else { this.showSnackbar("Please enter a valid quantity.", true); }
+                },
+                showWeightModal(product) {
+                    const price = product.price || 0;
+                    this.showModal(`<h3 class="text-lg font-bold mb-4">Add ${product.name}</h3><p class="mb-4 text-sm text-gray-600">Price: ₹${price.toFixed(2)} per kg</p><div class="space-y-4"><div><label class="block text-sm font-medium">Weight (grams)</label><input type="number" id="weight-grams" class="w-full p-2 border rounded-lg"></div><div><label class="block text-sm font-medium">Price (₹)</label><input type="number" id="weight-price" class="w-full p-2 border rounded-lg"></div></div><div class="flex justify-end space-x-2 mt-4"><button class="btn-secondary px-4 py-2 rounded-lg" onclick="app.closeModal()">Cancel</button><button class="btn-primary px-4 py-2 rounded-lg" onclick="app.confirmWeightModal('${product.id}')">Add to Cart</button></div>`);
+                    const weightInput = document.getElementById('weight-grams');
+                    const priceInput = document.getElementById('weight-price');
+                    weightInput.addEventListener('input', () => {
+                        const weight = parseFloat(weightInput.value) || 0;
+                        priceInput.value = ((price / 1000) * weight).toFixed(2);
                     });
-                });
-
-                document.querySelectorAll('.remove-item-btn').forEach(button => {
-                    button.addEventListener('click', (event) => {
-                        const productCard = event.target.closest('[data-id]');
-                        const productId = productCard.dataset.id;
-                        adjustQuantity(productId, -cart[productId].quantity);
+                    priceInput.addEventListener('input', () => {
+                        const newPrice = parseFloat(priceInput.value) || 0;
+                        if(price > 0) { weightInput.value = Math.round((newPrice / price) * 1000); }
                     });
-                });
-            }
-            totalAmountSpan.textContent = `$${total.toFixed(2)}`;
-            checkoutButton.disabled = itemIds.length === 0;
-        }
+                    weightInput.focus();
+                },
+                confirmWeightModal(productId) {
+                    const product = this.products.find(p => p.id === productId);
+                    const weightGrams = parseFloat(document.getElementById('weight-grams').value);
+                    if (product && weightGrams > 0) {
+                        this.addToCart(product, { weightGrams });
+                        this.closeModal();
+                    } else { this.showSnackbar("Please enter a valid weight or price.", true); }
+                },
+                createLoadingModal(text) { return `<div class="flex items-center justify-center p-4"><div class="loader mr-4"></div><p>${text}</p></div>`; },
+                createSaleSuccessModal(billId) {
+                    return `<div class="text-center"><i class="fa-solid fa-circle-check fa-4x text-green-500 mb-4"></i><h3 class="text-xl font-bold">Sale Completed!</h3><p class="text-gray-600 mt-2">Bill No: <strong>${billId}</strong></p><p class="text-gray-600">Total: <strong>₹${this.getCartTotal().toFixed(2)}</strong></p><div class="flex justify-center space-x-2 mt-6"><button class="btn-secondary px-4 py-2 rounded-lg" onclick="app.closeModal()">OK</button><button class="btn-primary px-4 py-2 rounded-lg" onclick="app.printBill(app.getCartAsArray(), '${billId}'); app.closeModal();">Print Bill</button></div></div>`;
+                },
+                handleResize() {
+                    const cartSection = this.elements.cartSection;
+                    if (window.innerWidth < 768) { 
+                        cartSection.classList.add('mobile-overlay', 'fixed', 'top-0', 'right-0', 'h-full', 'z-30');
+                        cartSection.classList.remove('flex');
+                        cartSection.classList.add('hidden');
 
-        // Show a temporary notification message
-        function showNotification(messageDiv, duration = 3000) {
-            messageDiv.classList.remove('hidden');
-            setTimeout(() => {
-                messageDiv.classList.add('hidden');
-            }, duration);
-        }
-
-        // Checkout process
-        checkoutButton.addEventListener('click', async () => {
-            if (Object.keys(cart).length === 0) {
-                errorNotification.textContent = "Cart is empty. Please add items to process sale.";
-                showNotification(errorNotification, 2000); 
-                return;
-            }
-
-            const outletId = outletSelect.value;
-            const itemsForApi = Object.values(cart).map(item => ({
-                item_id: item.id,
-                quantity: item.quantity,
-                unit_price: item.price
-            }));
-            const totalAmount = parseFloat(totalAmountSpan.textContent.replace('$', ''));
-
-            // NEW: Get customer_id and payment_status
-            const customerId = customerIdInput.value.trim() || 'anonymous'; // Use 'anonymous' if empty
-            const paymentStatus = paymentStatusSelect.value;
-
-            const payload = {
-                outlet_id: outletId,
-                items: itemsForApi,
-                total_amount: totalAmount,
-                payment_method: "cash", // Simplified for now, can be expanded
-                customer_id: customerId, // NEW: Include customer ID
-                payment_status: paymentStatus // NEW: Include payment status
-            };
-
-            console.log('Sending payload:', payload);
-
-            try {
-                const response = await fetch(SALES_API_URL, { // Use SALES_API_URL
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(payload),
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('Sale recorded successfully:', data);
-                    notification.textContent = "Sale Processed Successfully!";
-                    showNotification(notification);
-                    cart = {}; // Clear cart on successful sale
-                    renderCart(); // Re-render empty cart
-                    await fetchProducts(); // Refresh products to update stock display
-                    customerIdInput.value = ''; // Clear customer ID input after sale
-                } else {
-                    const errorData = await response.json();
-                    console.error('Error recording sale:', response.status, errorData);
-                    errorNotification.textContent = `Error: ${errorData.error || 'Unknown error'}`;
-                    showNotification(errorNotification);
-                }
-            } catch (error) {
-                console.error('Network or other error:', error);
-                errorNotification.textContent = `Network Error: ${error.message || 'Check connection'}`;
-                showNotification(errorNotification);
-            }
-        });
-
-        // Print Receipt functionality
-        printReceiptBtn.addEventListener('click', () => {
-            if (Object.keys(cart).length === 0) {
-                errorNotification.textContent = "Cart is empty. Cannot print an empty receipt.";
-                showNotification(errorNotification);
-                return;
-            }
-
-            // Create print-friendly content
-            const printContent = `
-                <div id="print-area" class="text-black p-4">
-                    <h2 class="text-2xl font-bold text-center mb-4">Bakery Receipt</h2>
-                    <p class="text-center mb-4">Date: ${new Date().toLocaleDateString()}</p>
-                    <p class="mb-2">Outlet: ${outletSelect.options[outletSelect.selectedIndex].text}</p>
-                    <p class="mb-2">Customer ID: ${customerIdInput.value.trim() || 'Anonymous'}</p> 
-                    <p class="mb-2">Payment Status: ${paymentStatusSelect.value}</p> 
-                    <hr class="border-t-2 border-gray-400 my-4">
-                    <h3 class="text-xl font-semibold mb-2">Items:</h3>
-                    <ul class="list-none p-0">
-                        ${Object.values(cart).map(item => `
-                            <li class="flex justify-between py-1">
-                                <span>${item.name} (${item.quantity}x)</span>
-                                <span>$${(item.price * item.quantity).toFixed(2)}</span>
-                            </li>
-                        `).join('')}
-                    </ul>
-                    <hr class="border-t-2 border-gray-400 my-4">
-                    <div class="flex justify-between text-xl font-bold">
-                        <span>Total:</span>
-                        <span>${totalAmountSpan.textContent}</span>
-                    </div>
-                    <p class="text-center mt-4">Thank you for your purchase!</p>
-                </div>
-            `;
-
-            // Open a new window for printing
-            const printWindow = window.open('', '_blank');
-            printWindow.document.open();
-            printWindow.document.write(`
-                <html>
-                <head>
-                    <title>Print Receipt</title>
-                    <style>
-                        body { font-family: 'Inter', sans-serif; margin: 0; padding: 20px; }
-                        .text-black { color: black; }
-                        .text-2xl { font-size: 1.5rem; }
-                        .text-xl { font-size: 1.25rem; }
-                        .font-bold { font-weight: 700; }
-                        .text-center { text-align: center; }
-                        .mb-4 { margin-bottom: 1rem; }
-                        .mb-2 { margin-bottom: 0.5rem; }
-                        .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
-                        .my-4 { margin-top: 1rem; margin-bottom: 1rem; }
-                        .flex { display: flex; }
-                        .justify-between { justify-content: space-between; }
-                        .text-xl { font-size: 1.25rem; }
-                        .font-semibold { font-weight: 600; }
-                        .list-none { list-style: none; }
-                        .p-0 { padding: 0; }
-                        .mt-4 { margin-top: 1rem; }
-                        .border-t-2 { border-top-width: 2px; }
-                        .border-gray-400 { border-color: #9ca3af; }
-                    </style>
-                </head>
-                <body>${printContent}</body>
-                </html>
-            `);
-            printWindow.document.close();
-            printWindow.focus();
-            printWindow.print();
-            printWindow.close();
-        });
-
-
-        // Add Product Modal Logic
-        addProductBtn.addEventListener('click', () => {
-            addProductModal.style.display = 'flex'; // Show modal
-        });
-
-        saveNewProductBtn.addEventListener('click', async () => { // Made async to await API call
-            const name = newProductNameInput.value.trim();
-            const price = parseFloat(newProductPriceInput.value);
-            const stock = parseInt(newProductStockInput.value); // Get initial stock
-            const img = newProductImgInput.value.trim();
-
-            if (name && !isNaN(price) && price > 0 && !isNaN(stock) && stock >= 0) {
-                const newProductId = generateProductId(name);
-                const productExists = products.some(p => p.id === newProductId);
-                if (productExists) {
-                    errorNotification.textContent = `Product with name '${name}' (ID: ${newProductId}) already exists.`;
-                    showNotification(errorNotification);
-                    return;
-                }
-
-                const productData = { id: newProductId, name, price, stock, img };
-                const saved = await saveNewProductToBackend(productData); // Save to backend (Firestore)
-
-                if (saved) {
-                    // Products are refreshed via fetchProducts() inside saveNewProductToBackend's success path
-                    addProductModal.style.display = 'none'; // Hide modal
-                    newProductNameInput.value = '';
-                    newProductPriceInput.value = '';
-                    newProductStockInput.value = '0'; // Reset stock input
-                    newProductImgInput.value = '';
-                }
-            } else {
-                showNotification(errorNotification);
-                errorNotification.textContent = "Please enter valid product name, price, and initial stock.";
-            }
-        });
-
-        // QR Scanner Modal Logic
-        scanProductBtn.addEventListener('click', () => {
-            qrScannerModal.style.display = 'flex'; // Show modal
-            qrResultDiv.textContent = 'Scan result: None'; // Reset result
-
-            html5QrCode = new Html5Qrcode("reader");
-            const qrCodeSuccessCallback = (decodedText, decodedResult) => {
-                qrResultDiv.textContent = `Scan result: ${decodedText}`;
-                const foundProduct = products.find(p => p.id === decodedText);
-                if (foundProduct) {
-                    addToCart(foundProduct.id, foundProduct.name, foundProduct.price, foundProduct.stock); // Pass all details
-                    html5QrCode.stop().then(() => {
-                        qrScannerModal.style.display = 'none'; // Close modal after successful scan and add
-                        showNotification(notification);
-                        notification.textContent = `Added ${foundProduct.name} to cart!`;
-                    }).catch((err) => {
-                        console.error("Failed to stop QR scanner:", err);
-                    });
-                } else {
-                    errorNotification.textContent = `Product with QR code '${decodedText}' not found!`;
-                    showNotification(errorNotification);
+                    } else {
+                        cartSection.classList.remove('mobile-overlay', 'fixed', 'top-0', 'right-0', 'h-full', 'z-30', 'hidden', 'active');
+                        cartSection.classList.add('flex');
+                    }
+                },
+                showMobileCart() {
+                    const cartSection = this.elements.cartSection;
+                    cartSection.classList.remove('hidden');
+                    // Timeout to allow the display property to apply before transitioning
+                    setTimeout(() => cartSection.classList.add('active'), 10);
+                },
+                hideMobileCart() {
+                    const cartSection = this.elements.cartSection;
+                    cartSection.classList.remove('active');
+                     // Hide the element after the transition ends
+                    setTimeout(() => cartSection.classList.add('hidden'), 300);
                 }
             };
-            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-
-            // Ensure camera permissions are granted by the browser
-            Html5Qrcode.getCameras().then(devices => {
-                if (devices && devices.length) {
-                    html5QrCode.start({ facingMode: "environment" }, config, qrCodeSuccessCallback, (errorMessage) => {
-                        // console.log(`QR Scan error: ${errorMessage}`); // Avoid excessive logging
-                    });
-                } else {
-                    errorNotification.textContent = "No camera found or permissions denied.";
-                    showNotification(errorNotification);
-                    qrScannerModal.style.display = 'none'; // Close modal if no camera
-                }
-            }).catch(err => {
-                errorNotification.textContent = `Camera access error: ${err}`;
-                showNotification(errorNotification);
-                qrScannerModal.style.display = 'none'; // Close modal on error
-            });
-        });
-
-        // Common close logic for all modals
-        closeButtons.forEach(button => {
-            button.addEventListener('click', (event) => {
-                const modalId = event.target.dataset.modal;
-                if (modalId) {
-                    document.getElementById(modalId).style.display = 'none';
-                }
-                // Check if scanner is running and stop it when closing QR modal
-                if (html5QrCode && html5QrCode.isScanning) { 
-                    html5QrCode.stop().catch((err) => {
-                        console.error("Failed to stop QR scanner on close:", err);
-                    });
-                }
-            });
-        });
-
-        // Initialize on load
-        document.addEventListener('DOMContentLoaded', () => {
-            // Fetch products from backend when the page loads
-            fetchProducts(); 
-            renderCart(); // Initial render to show empty cart message
+            
+            app.init();
+            window.app = app;
         });
     </script>
 </body>

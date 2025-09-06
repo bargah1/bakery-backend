@@ -23,4 +23,6 @@ urlpatterns = [
     # These can remain as they will return a "disabled" message
     path('record-cctv-observation/', views.record_cctv_observation, name='record_cctv_observation'), 
     path('cctv-observation-report/', views.get_cctv_observation_report, name='cctv_observation_report'),
+    path('staff/salary/mark-paid/', views.mark_salary_as_paid, name='mark_salary_paid'),
+     path('staff/edit/<str:staff_id>/', views.edit_staff, name='edit_staff'),
 ]

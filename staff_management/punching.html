@@ -4,266 +4,278 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asthana Bakery - Staff Attendance</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #FEF2F2; }
-        .punch-button { transition: all 0.3s ease-in-out; }
-        .modal-bg { background-color: rgba(0,0,0,0.6); }
-        select, button {
-             border-radius: 0.5rem;
-             transition: all 0.2s;
+        :root {
+            --primary-color: #6A0B0B;
+            --light-gray: #f4f4f4;
+            --gray-text: #555;
+            --border-color: #ddd;
+            --success-green: #28a745;
+            --light-green: #e9f5ec;
         }
-        select:focus {
-            outline: none;
-            border-color: #6A0B0B; 
-            box-shadow: 0 0 0 2px #FCA5A5;
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--light-gray);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
         }
-        /* Style for the main content area to be hidden initially */
-        #punch-section.hidden {
-            display: none;
+
+        .container {
+            width: 100%;
+            max-width: 700px;
+            background-color: #fff;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: var(--primary-color);
+            text-align: center;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+
+        .date-display {
+            text-align: center;
+            color: var(--gray-text);
+            font-size: 1.1em;
+            margin-bottom: 25px;
+            font-weight: 500;
+        }
+
+        #search-input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 20px;
+            font-size: 1em;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+
+        .staff-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 12px;
+            transition: all 0.3s ease; /* Smooth transition for color change */
+        }
+        
+        /* --- NEW: Styling for marked attendance --- */
+        .staff-item.marked-present {
+            background-color: var(--light-green);
+            border-left: 5px solid var(--success-green);
+        }
+
+        .staff-name {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .attendance-options { display: flex; gap: 10px; }
+        .attendance-options input[type="radio"] { display: none; }
+        .attendance-options label {
+            padding: 8px 16px;
+            border: 1px solid var(--primary-color);
+            color: var(--primary-color);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            font-weight: 500;
+        }
+        .attendance-options input[type="radio"]:checked + label {
+            background-color: var(--primary-color);
+            color: #fff;
+        }
+
+        #submit-btn {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #fff;
+            background-color: var(--primary-color);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        
+        #submit-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        #message {
+            text-align: center;
+            margin-top: 15px;
+            font-weight: bold;
+            min-height: 20px;
+        }
+        
+        .message-success { color: var(--success-green); }
+        .message-error { color: red; }
+        .message-info { color: var(--gray-text); }
+
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+            .container { padding: 15px; }
+            .staff-item { flex-direction: column; align-items: flex-start; gap: 15px; }
         }
     </style>
 </head>
-<body class="flex items-center justify-center min-h-screen p-4">
-    <div class="max-w-md w-full bg-white shadow-2xl rounded-2xl p-8 space-y-6">
-        <div class="text-center">
-            <h2 class="text-4xl font-extrabold text-[#6A0B0B]">Staff Attendance</h2>
-            <p class="mt-2 text-gray-600" id="currentTime">Loading time...</p>
-        </div>
+<body>
 
-        <div>
-            <label for="locationSelect" class="block text-sm font-medium text-gray-700">1. Select Your Location</label>
-            <select id="locationSelect" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm"></select>
-        </div>
-        
-        <div>
-             <label class="block text-sm font-medium text-gray-700">2. Authenticate Your Face</label>
-            <button id="faceAuthBtn" class="mt-1 w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-blue-600 hover:bg-blue-700">
-                <i class="fas fa-camera mr-2"></i> Authenticate with Face
-            </button>
-        </div>
-
-        <!-- This section is hidden until face auth is successful -->
-        <div id="punch-section" class="hidden">
-            <hr class="my-6">
-            <div>
-                <label for="staffSelect" class="block text-sm font-medium text-gray-700">Recognized Staff Member</label>
-                <select id="staffSelect" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm bg-gray-100" disabled></select>
-            </div>
-            <div id="punch-buttons-container" class="flex space-x-4 mt-4">
-                <!-- Clock-in/out buttons will be dynamically inserted here -->
-            </div>
-        </div>
-
-        <div id="notification" class="hidden text-center p-4 rounded-md text-white"></div>
+    <div class="container">
+        <h1>Staff Daily Attendance</h1>
+        <p class="date-display" id="current-date"></p>
+        <input type="text" id="search-input" placeholder="Search for staff...">
+        <div id="staff-list-container"></div>
+        <p id="message"></p>
+        <button id="submit-btn" disabled>Submit Attendance</button>
     </div>
-
-    <!-- Face Authentication Modal -->
-    <div id="faceAuthModal" class="modal-bg hidden fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg text-center">
-            <h3 class="text-2xl font-bold mb-4">Face Authentication</h3>
-            <div class="relative w-full aspect-video bg-gray-200 rounded-md overflow-hidden mb-4">
-                <video id="videoFeed" class="w-full h-full object-cover" autoplay playsinline></video>
-                <div id="faceAuthStatus" class="absolute inset-0 bg-black bg-opacity-50 text-white flex items-center justify-center text-lg font-semibold">
-                    Starting Camera...
-                </div>
-            </div>
-            <div class="flex space-x-4">
-                <button onclick="closeFaceAuthModal()" class="w-full py-2 px-4 bg-gray-500 text-white rounded-md">Cancel</button>
-                <button id="captureBtn" class="w-full py-2 px-4 bg-blue-600 text-white rounded-md">Capture & Recognize</button>
-            </div>
-        </div>
-    </div>
-    <canvas id="captureCanvas" class="hidden"></canvas>
 
     <script>
-        const API_BASE_URL = 'https://granny-universal-metropolitan-means.trycloudflare.com';
-        const STAFF_LIST_URL = `${API_BASE_URL}/staff/list/`;
-        const OUTLETS_URL = `${API_BASE_URL}/outlets/manage/`;
-        const PUNCH_URL = `${API_BASE_URL}/staff/punch-attendance/`;
-        const RECOGNIZE_URL = `${API_BASE_URL}/staff/recognize-face/`;
-        // NEW: URL for the new backend endpoint
-        const LAST_PUNCH_URL = `${API_BASE_URL}/staff/last-punch-status/`;
+        document.addEventListener('DOMContentLoaded', function() {
+            const API_BASE_URL = 'https://bakery-backend-5qkn.onrender.com';
+            const STAFF_LIST_ENDPOINT = `${API_BASE_URL}/staff/list/`;
+            const SUBMIT_ATTENDANCE_ENDPOINT = `${API_BASE_URL}/attendance/mark/`;
 
-        const locationSelect = document.getElementById('locationSelect');
-        const staffSelect = document.getElementById('staffSelect');
-        const notification = document.getElementById('notification');
-        const timeEl = document.getElementById('currentTime');
-        const punchSection = document.getElementById('punch-section');
-        const punchButtonsContainer = document.getElementById('punch-buttons-container');
-        
-        const faceAuthBtn = document.getElementById('faceAuthBtn');
-        const faceAuthModal = document.getElementById('faceAuthModal');
-        const faceAuthStatus = document.getElementById('faceAuthStatus');
-        const videoFeed = document.getElementById('videoFeed');
-        const captureBtn = document.getElementById('captureBtn');
-        const captureCanvas = document.getElementById('captureCanvas');
-        let videoStream = null;
+            const staffListContainer = document.getElementById('staff-list-container');
+            const submitBtn = document.getElementById('submit-btn');
+            const messageEl = document.getElementById('message');
+            const dateDisplay = document.getElementById('current-date');
+            const searchInput = document.getElementById('search-input');
 
-        function showNotification(message, isError = false) {
-            notification.textContent = message;
-            notification.className = `text-center p-4 rounded-md text-white ${isError ? 'bg-red-500' : 'bg-green-500'}`;
-            setTimeout(() => { notification.className = 'hidden text-center p-4 rounded-md text-white'; }, 4000);
-        }
+            const today = new Date();
+            dateDisplay.textContent = today.toLocaleDateString('en-IN', {
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+            });
 
-        async function fetchInitialData() {
-            try {
-                const [staffRes, outletsRes] = await Promise.all([
-                    fetch(STAFF_LIST_URL),
-                    fetch(OUTLETS_URL)
-                ]);
-                const staffList = await staffRes.json();
-                const outletsList = await outletsRes.json();
-                
-                staffSelect.innerHTML = staffList.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-                locationSelect.innerHTML = outletsList.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
-            } catch (e) {
-                showNotification('Error loading initial data. Please reload.', true);
-                console.error(e);
-            }
-        }
-
-        async function punch(type) {
-            const staffId = staffSelect.value;
-            const locationId = locationSelect.value;
-
-            if (!staffId || !locationId) {
-                showNotification('Please select your name and location.', true);
-                return;
+            async function fetchStaff() {
+                // ... fetchStaff logic remains the same ...
+                showMessage('Loading staff list...', 'info');
+                try {
+                    const response = await fetch(STAFF_LIST_ENDPOINT);
+                    const contentType = response.headers.get("content-type");
+                    if (!response.ok || !contentType || !contentType.includes("application/json")) {
+                        throw new Error(`Server returned an invalid response. Check API URL.`);
+                    }
+                    const staffList = await response.json();
+                    renderStaffList(staffList);
+                    submitBtn.disabled = false;
+                    showMessage('', 'info');
+                } catch (error) {
+                    console.error('Failed to fetch staff:', error);
+                    showMessage(error.message, 'error');
+                }
             }
             
-            document.querySelectorAll('.punch-button').forEach(btn => btn.disabled = true);
-
-            try {
-                const response = await fetch(PUNCH_URL, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ staff_id: staffId, type: type, location_id: locationId })
+            function renderStaffList(staffList) {
+                // ... renderStaffList logic remains the same ...
+                let html = '';
+                staffList.forEach(staff => {
+                    html += `
+                        <div class="staff-item" data-staff-id="${staff.id}">
+                            <div class="staff-name">${staff.name}</div>
+                            <div class="attendance-options">
+                                <input type="radio" id="full-${staff.id}" name="attendance-${staff.id}" value="full_day" required>
+                                <label for="full-${staff.id}">Full Day</label>
+                                <input type="radio" id="half-${staff.id}" name="attendance-${staff.id}" value="half_day">
+                                <label for="half-${staff.id}">Half Day</label>
+                                <input type="radio" id="absent-${staff.id}" name="attendance-${staff.id}" value="absent" checked>
+                                <label for="absent-${staff.id}">Absent</label>
+                            </div>
+                        </div>`;
                 });
-                const data = await response.json();
-                if (response.ok) {
-                    showNotification(data.message || 'Punch successful!', false);
-                    punchSection.classList.add('hidden'); // Hide after successful punch
-                } else {
-                    throw new Error(data.error || 'An unknown error occurred.');
-                }
-            } catch (e) {
-                showNotification(`Error: ${e.message}`, true);
-            } finally {
-                document.querySelectorAll('.punch-button').forEach(btn => btn.disabled = false);
+                staffListContainer.innerHTML = html;
             }
-        }
 
-        // --- Face Authentication Functions (Updated) ---
-
-        async function openFaceAuthModal() {
-            faceAuthModal.classList.remove('hidden');
-            faceAuthStatus.textContent = 'Starting Camera...';
-            try {
-                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
-                videoFeed.srcObject = videoStream;
-                videoFeed.onloadedmetadata = () => {
-                    faceAuthStatus.textContent = 'Position your face in the frame';
-                };
-            } catch (err) {
-                console.error("Camera Error:", err);
-                faceAuthStatus.textContent = 'Camera access denied or not available.';
-                showNotification('Could not access camera. Please check permissions.', true);
+            function filterStaff() {
+                // ... filterStaff logic remains the same ...
+                const searchTerm = searchInput.value.toLowerCase().trim();
+                const staffItems = document.querySelectorAll('.staff-item');
+                staffItems.forEach(item => {
+                    const staffName = item.querySelector('.staff-name').textContent.toLowerCase();
+                    item.style.display = staffName.includes(searchTerm) ? 'flex' : 'none';
+                });
             }
-        }
 
-        function closeFaceAuthModal() {
-            if (videoStream) {
-                videoStream.getTracks().forEach(track => track.stop());
-            }
-            faceAuthModal.classList.add('hidden');
-        }
-
-        async function captureAndRecognize() {
-            if (!videoStream) {
-                showNotification('Camera is not active.', true); return;
-            }
-            faceAuthStatus.textContent = 'Recognizing...';
-            captureBtn.disabled = true;
-
-            const context = captureCanvas.getContext('2d');
-            captureCanvas.width = videoFeed.videoWidth;
-            captureCanvas.height = videoFeed.videoHeight;
-            context.drawImage(videoFeed, 0, 0, captureCanvas.width, captureCanvas.height);
-
-            captureCanvas.toBlob(async (blob) => {
-                const formData = new FormData();
-                formData.append('file', blob, 'capture.jpg');
-                formData.append('camera_id', locationSelect.value);
-
+            // --- FIXED: The complete submitAttendance function ---
+            async function submitAttendance() {
+                const staffItems = document.querySelectorAll('.staff-item');
+                const attendanceData = [];
+                
+                staffItems.forEach(item => {
+                    const staffId = item.dataset.staffId;
+                    const selectedOption = item.querySelector(`input[name="attendance-${staffId}"]:checked`);
+                    if (selectedOption) {
+                        attendanceData.push({
+                            staff_id: staffId,
+                            status: selectedOption.value,
+                        });
+                    }
+                });
+                
+                showMessage('Submitting...', 'info');
+                submitBtn.disabled = true;
+                
                 try {
-                    const response = await fetch(RECOGNIZE_URL, { method: 'POST', body: formData });
-                    const result = await response.json();
-                    if (!response.ok || !result.identified_staff || result.identified_staff.length === 0) {
-                        throw new Error(result.message || 'Face not recognized.');
+                    const response = await fetch(SUBMIT_ATTENDANCE_ENDPOINT, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            date: today.toISOString().split('T')[0],
+                            attendance: attendanceData
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Server responded with an error.');
                     }
                     
-                    const recognizedStaff = result.identified_staff[0];
-                    staffSelect.value = recognizedStaff.staff_id;
-                    showNotification(`Welcome, ${recognizedStaff.name}!`, false);
-                    
-                    // NEW: Fetch last punch status and show the correct button
-                    await showCorrectPunchButton(recognizedStaff.staff_id);
-                    
-                    closeFaceAuthModal();
+                    const result = await response.json();
+                    showMessage(result.message || 'Attendance submitted successfully!', 'success');
 
-                } catch (e) {
-                    showNotification(`Recognition Failed: ${e.message}`, true);
-                    faceAuthStatus.textContent = 'Face not recognized. Try again.';
+                    // --- NEW: Add green highlight after successful submission ---
+                    attendanceData.forEach(item => {
+                        if (item.status === 'full_day' || item.status === 'half_day') {
+                            const staffDiv = document.querySelector(`.staff-item[data-staff-id="${item.staff_id}"]`);
+                            if (staffDiv) {
+                                staffDiv.classList.add('marked-present');
+                            }
+                        }
+                    });
+                    
+                } catch (error) {
+                    console.error('Failed to submit attendance:', error);
+                    showMessage(`Error: ${error.message}`, 'error');
                 } finally {
-                    captureBtn.disabled = false;
+                    submitBtn.disabled = false;
                 }
-            }, 'image/jpeg');
-        }
-
-        // NEW: Function to get last punch status and display the correct button
-        async function showCorrectPunchButton(staffId) {
-            try {
-                const response = await fetch(`${LAST_PUNCH_URL}${staffId}/`);
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Could not get status');
-
-                punchButtonsContainer.innerHTML = ''; // Clear previous buttons
-
-                if (data.last_punch === 'clock_in') {
-                    // If last punch was IN, show the CLOCK OUT button
-                    punchButtonsContainer.innerHTML = `
-                        <button onclick="punch('clock_out')" class="punch-button w-full flex justify-center py-4 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-red-600 hover:bg-red-700">
-                            <i class="fas fa-sign-out-alt mr-2"></i> Clock Out
-                        </button>`;
-                } else {
-                    // If last punch was OUT or NONE, show the CLOCK IN button
-                    punchButtonsContainer.innerHTML = `
-                        <button onclick="punch('clock_in')" class="punch-button w-full flex justify-center py-4 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-green-600 hover:bg-green-700">
-                            <i class="fas fa-sign-in-alt mr-2"></i> Clock In
-                        </button>`;
-                }
-                punchSection.classList.remove('hidden'); // Show the whole section
-            } catch (e) {
-                showNotification(`Error getting status: ${e.message}`, true);
             }
-        }
+            
+            function showMessage(msg, type) {
+                messageEl.textContent = msg;
+                messageEl.className = `message-${type || 'info'}`;
+            }
 
-        function updateTime() {
-            const now = new Date();
-            timeEl.textContent = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            fetchInitialData();
-            updateTime();
-            setInterval(updateTime, 1000);
-
-            faceAuthBtn.addEventListener('click', openFaceAuthModal);
-            captureBtn.addEventListener('click', captureAndRecognize);
+            searchInput.addEventListener('input', filterStaff);
+            submitBtn.addEventListener('click', submitAttendance);
+            fetchStaff();
         });
     </script>
+
 </body>
 </html>

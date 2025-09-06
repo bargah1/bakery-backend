@@ -1,49 +1,45 @@
-# In bakery_ai_manager/firestore_client.py
+# In your firebase_config.py
 
 import os
+import json
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# --- THIS IS THE SINGLE SOURCE OF AUTHENTICATION ---
-# This method uses a dedicated Service Account key file, which is the most reliable
-# way to authenticate a server application.
+def initialize_and_get_client():
+    """
+    Initializes the Firebase Admin SDK using credentials from an environment
+    variable containing the JSON content. Returns a Firestore client.
+    """
+    if not firebase_admin._apps:
+        print("DEBUG: Initializing Firebase Admin SDK...")
+        try:
+            # Get the JSON credentials content from the environment variable
+            creds_json_str = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
 
-# 1. Define the path to your service account key file.
-#    This assumes you have a 'config' folder in your project's root directory
-#    containing your key file.
-SERVICE_ACCOUNT_KEY_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), # The 'bakery_ai_manager' directory
-    '..',                                       # Go up one level to the project root
-    'config',                                   # Go into the 'config' folder
-    'service_account_key.json'                  # Your key file
-)
+            if not creds_json_str:
+                raise ValueError("The 'GOOGLE_APPLICATION_CREDENTIALS_JSON' environment variable is not set.")
 
-# 2. Check if the key file exists.
-if not os.path.exists(SERVICE_ACCOUNT_KEY_PATH):
-    print("="*60)
-    print(f"FATAL ERROR: Service Account Key not found at: {SERVICE_ACCOUNT_KEY_PATH}")
-    print("Please ensure you have a 'config' folder in your project root")
-    print("and that your downloaded service account key is inside it,")
-    print("named 'service_account_key.json'.")
-    print("="*60)
-    exit(1) # Stop the server if the key is missing.
+            # Parse the JSON string into a dictionary
+            creds_json = json.loads(creds_json_str)
+            
+            # Initialize the app with the credentials object
+            cred = credentials.Certificate(creds_json)
+            firebase_admin.initialize_app(cred)
+            print("✅ Firebase Admin SDK initialized successfully.")
 
-# 3. Set an environment variable that ALL Google Cloud libraries will automatically use.
-#    This is the key to unifying authentication.
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = SERVICE_ACCOUNT_KEY_PATH
+        except Exception as e:
+            print("="*80)
+            print("🔥 FATAL ERROR: Failed to initialize Firebase Admin SDK.")
+            print(f"Error: {e}")
+            print("\nCheck that the 'GOOGLE_APPLICATION_CREDENTIALS_JSON' variable is set correctly in Railway.")
+            print("="*80)
+            exit(1) # Stop the server if authentication fails.
 
-# 4. Initialize Firebase Admin SDK (it will use the environment variable automatically).
-if not firebase_admin._apps:
-    try:
-        firebase_admin.initialize_app()
-        print("DEBUG: Firebase Admin SDK initialized successfully using Service Account.")
-    except Exception as e:
-        print(f"FATAL ERROR: Failed to initialize Firebase with Service Account. Error: {e}")
-        exit(1)
+    return firestore.client()
 
-# 5. Get a Firestore client instance that uses these credentials.
-db = firestore.client()
+# Initialize the client once when the app starts
+db = initialize_and_get_client()
 
 def get_firestore_client():
-    """Returns the globally initialized Firestore client."""
+    """Returns the globally initialized Firestore client instance."""
     return db

@@ -1,5 +1,6 @@
 # ===================================================================
-# File: app.py (New Flask Application)
+# File: app.py (Updated version using a local Whisper model for STT)
+# NOTE: This version requires more RAM as it loads the STT model.
 # ===================================================================
 import os
 import datetime
@@ -13,12 +14,12 @@ import google.generativeai as genai
 import google.auth
 import numpy as np
 import requests
-import cv2 # Not directly used in the provided snippets, but kept as it was in your original
+# import cv2 # Not directly used in the provided snippets, but kept as it was in your original
 
-# --- For Speech-to-Text (using OpenAI Whisper locally) ---
-import whisper
-import tempfile # For creating temporary files
-import shutil   # For cleaning up temporary directories
+# --- For Speech-to-Text (using local Whisper model) ---
+import whisper   # <-- ADD THIS
+import tempfile  # For creating temporary files
+import shutil    # For cleaning up temporary directories
 
 # --- CONFIGURATION ---
 from dotenv import load_dotenv
@@ -34,19 +35,17 @@ PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
 app = Flask(__name__)
 
 # --- INITIALIZE CLIENTS ---
-# Initialize Google Cloud clients and Gemini model globally once
+# Initialize Google Cloud clients and AI models globally once
 db = None
 model = None
 translate_client = None
 tts_client = None
-whisper_model = None # New: For Whisper STT
+whisper_model = None # <-- ADD THIS for the local STT model
 
 def initialize_clients():
     global db, model, translate_client, tts_client, whisper_model
     try:
-        if not google.auth.default()[0]: # Check if credentials are set up
-            # If running locally, you might need to set GOOGLE_APPLICATION_CREDENTIALS env var
-            # or use `gcloud auth application-default login`
+        if not google.auth.default()[0]:
             print("WARNING: Google Cloud credentials not found. Some services may fail.")
             print("Please ensure GOOGLE_APPLICATION_CREDENTIALS is set or gcloud auth is configured.")
 
@@ -55,19 +54,21 @@ def initialize_clients():
         translate_client = translate.Client(credentials=credentials)
         tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
         genai.configure(api_key=GOOGLE_API_KEY)
-        model = genai.GenerativeModel('models/gemini-1.5-flash-latest') # Using latest for tool calling
+        model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
         
-        print("DEBUG: Initializing Whisper model...")
-        # Choose a model size: "tiny", "base", "small", "medium", "large"
-        # "base" is a good balance for testing, "small" for better accuracy.
-        # "large" offers highest accuracy but is very resource intensive.
-        whisper_model = whisper.load_model("base") # Or "small" for better Malayalam
-        print("DEBUG: Whisper model loaded.")
-
+        # --- LOAD LOCAL WHISPER MODEL ---
+        # This loads the model into memory. "small" is a good balance of
+        # speed and accuracy for multiple languages.
+        # The first time this runs, it will download the model weights.
+        print("DEBUG: Loading local Whisper model ('small'). This may take a moment...")
+        whisper_model = whisper.load_model("small")
+        print("DEBUG: Whisper model loaded successfully.")
+        # --- END OF MODEL LOADING ---
+        
         print("DEBUG: All services initialized successfully.")
     except Exception as e:
         print(f"FATAL ERROR: Could not initialize services. Error: {e}")
-        db, model, translate_client, tts_client = None, None, None, None, None
+        db, model, translate_client, tts_client, whisper_model = None, None, None, None, None
 
 # Call initialization once when the app starts
 with app.app_context():
@@ -257,13 +258,10 @@ def get_ownerbot_response(message: str, mode: str = 'voice'):
     4. After a tool is called, present its output data directly as your final answer.
     """
     
-    # Ensure the Gemini model is initialized and re-configured if necessary (though global init should handle it)
     if not model:
-        # Fallback if model wasn't initialized, try again.
-        # In a production Flask app, you'd handle this more robustly (e.g., using Blueprints with setup functions)
         print("WARN: Gemini model not initialized, attempting re-initialization.")
-        initialize_clients() # Try to re-initialize all clients
-        if not model: # If still not initialized, return error
+        initialize_clients() 
+        if not model: 
             return {"text_response": "Error: Gemini model not available.", "audio_response": None}
 
     tools = [
@@ -279,7 +277,7 @@ def get_ownerbot_response(message: str, mode: str = 'voice'):
 
     try:
         chat = model.start_chat(enable_automatic_function_calling=True)
-        response = chat.send_message(msg_en, tools=tools) # Pass the list of functions
+        response = chat.send_message(msg_en, tools=tools) 
         text_en = response.text
             
     except Exception as e:
@@ -308,12 +306,10 @@ def get_profit_report(start_date: str, end_date: str):
         total_revenue = sum(doc.to_dict().get('total_amount', 0.0) for doc in sales_query.stream())
 
         # 2. Calculate Cost of Goods Sold (from production)
-        # Assuming 'production_logs' contains documents with 'total_cost'
         prod_query = db.collection('production_logs').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
         cogs = sum(doc.to_dict().get('total_cost', 0.0) for doc in prod_query.stream())
 
         # 3. Calculate Operating Expenses
-        # Assuming 'expenses' collection contains documents with 'amount'
         expenses_query = db.collection('expenses').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
         op_expenses = sum(doc.to_dict().get('amount', 0.0) for doc in expenses_query.stream())
 
@@ -322,11 +318,11 @@ def get_profit_report(start_date: str, end_date: str):
 
         report = (
             f"Profit & Loss Report for {start_date} to {end_date}:\n"
-            f"- Total Revenue:  ₹{total_revenue:,.2f}\n"
+            f"- Total Revenue:      ₹{total_revenue:,.2f}\n"
             f"- Cost of Goods: -₹{cogs:,.2f}\n"
             f"- Operating Expenses: -₹{op_expenses:,.2f}\n"
             f"----------------------------------\n"
-            f"- Net Profit:  ₹{net_profit:,.2f}"
+            f"- Net Profit:      ₹{net_profit:,.2f}"
         )
         return report
     except Exception as e:
@@ -359,9 +355,6 @@ def parse_voice_order(spoken_text: str):
         if not available_products_details:
             return {"error": "No products found in the database to match against."}
 
-        # --- FIX: Correctly escaped the JSON examples in the prompt ---
-        # The JSON examples now use double curly braces {{...}} to correctly
-        # represent literal braces inside the f-string.
         prompt = f"""
         You are a highly accurate billing assistant for a bakery in Kerala, India.
         Your task is to analyze a spoken order and convert it into a structured JSON list.
@@ -413,15 +406,16 @@ def parse_voice_order(spoken_text: str):
 
 @app.route('/voice-to-text/', methods=['POST'])
 def handle_voice_to_text():
-    global whisper_model
+    # <-- THIS ENTIRE FUNCTION IS UPDATED TO USE THE LOCAL MODEL -->
     if not whisper_model:
-        return jsonify({"error": "Speech-to-Text service not initialized on backend."}), 500
+        return jsonify({"error": "Speech recognition model not loaded."}), 503
 
     if 'Content-Type' not in request.headers or 'audio/wav' not in request.headers['Content-Type']:
         return jsonify({"error": "Unsupported Media Type. Please send audio/wav."}), 415
 
+    temp_audio_path = None
     try:
-        audio_data = request.data # Get raw audio bytes
+        audio_data = request.data
 
         # Create a temporary file to save the audio
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio_file:
@@ -430,10 +424,10 @@ def handle_voice_to_text():
         
         print(f"DEBUG: Audio saved to temporary path: {temp_audio_path}")
 
-        # Transcribe the audio using Whisper
-        # Use language="ml" for Malayalam to guide Whisper
-        result = whisper_model.transcribe(temp_audio_path, language="ml")
+        # --- REPLACED API CALL WITH LOCAL WHISPER MODEL ---
+        result = whisper_model.transcribe(temp_audio_path, language="ml") # Transcribe with language hint
         recognized_text = result["text"]
+        # --- END OF REPLACEMENT ---
 
         # Clean up the temporary file
         os.unlink(temp_audio_path)
@@ -445,7 +439,7 @@ def handle_voice_to_text():
 
         # Check if parse_voice_order returned an error dictionary
         if isinstance(parsed_order_data, dict) and 'error' in parsed_order_data:
-            return jsonify(parsed_order_data), 400 # Return 400 if parsing had an error
+            return jsonify(parsed_order_data), 400
 
         return jsonify({
             "recognized_text": recognized_text,
@@ -455,11 +449,10 @@ def handle_voice_to_text():
     except Exception as e:
         print(f"ERROR: Error processing voice-to-text on backend: {e}")
         # Clean up temp file in case of error
-        if 'temp_audio_path' in locals() and os.path.exists(temp_audio_path):
+        if temp_audio_path and os.path.exists(temp_audio_path):
             os.unlink(temp_audio_path)
         return jsonify({"error": f"Internal server error during voice processing: {str(e)}"}), 500
 
-# Endpoint to fetch products (existing)
 @app.route('/items/manage-products/', methods=['GET'])
 def get_products():
     global db
@@ -478,7 +471,6 @@ def get_products():
         print(f"Error fetching products: {e}")
         return jsonify({"error": f"Failed to fetch products: {str(e)}"}), 500
 
-# Endpoint to fetch outlets (existing)
 @app.route('/outlets/manage/', methods=['GET'])
 def get_outlets():
     global db
@@ -497,7 +489,6 @@ def get_outlets():
         print(f"Error fetching outlets: {e}")
         return jsonify({"error": f"Failed to fetch outlets: {str(e)}"}), 500
 
-# Endpoint to process sales (existing)
 @app.route('/sales/process/', methods=['POST'])
 def process_sale_endpoint():
     global db
@@ -508,21 +499,16 @@ def process_sale_endpoint():
         if not sale_data:
             return jsonify({"error": "No sale data provided"}), 400
 
-        # Validate sale_data structure, especially items list
         if not isinstance(sale_data.get('items'), list) or not sale_data.get('outlet_id') or not sale_data.get('total_amount') is not None:
             return jsonify({"error": "Invalid sale data format"}), 400
 
-        # Generate a unique numeric bill ID
-        # You might have a more robust bill ID generation in a real system
         timestamp_ms = int(datetime.datetime.now().timestamp() * 1000)
-        numeric_bill_id = str(timestamp_ms)[-8:] # Last 8 digits of timestamp for a simple ID
+        numeric_bill_id = str(timestamp_ms)[-8:]
 
-        # Add timestamp and bill ID
         sale_data['timestamp'] = datetime.datetime.now().isoformat()
         sale_data['date'] = datetime.date.today().isoformat()
         sale_data['numeric_bill_id'] = numeric_bill_id
 
-        # Update stock for piece items
         batch = db.batch()
         for item in sale_data['items']:
             product_id = item.get('product_id')
@@ -533,10 +519,7 @@ def process_sale_endpoint():
                 product_ref = db.collection('items').document(product_id)
                 batch.update(product_ref, {'stock': firestore.Increment(-quantity)})
         
-        # Commit stock updates
         batch.commit()
-
-        # Save sale record
         doc_ref = db.collection('sales').add(sale_data)
         
         return jsonify({"message": "Sale processed successfully", "bill_id": doc_ref[1].id, "numeric_bill_id": numeric_bill_id}), 201
@@ -545,14 +528,12 @@ def process_sale_endpoint():
         print(f"Error processing sale: {e}")
         return jsonify({"error": f"Failed to process sale: {str(e)}"}), 500
 
-# Endpoint to find sales (existing)
 @app.route('/sales/find/<string:numeric_bill_id>/', methods=['GET'])
 def find_sale_by_numeric_id(numeric_bill_id):
     global db
     if not db:
         return jsonify({"error": "Database not connected"}), 500
     try:
-        # Query for the sale using numeric_bill_id
         query = db.collection('sales').where(filter=FieldFilter('numeric_bill_id', '==', numeric_bill_id)).limit(1)
         docs = list(query.stream())
 

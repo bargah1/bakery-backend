@@ -6,6 +6,406 @@ from rest_framework import status
 from datetime import datetime, timedelta
 from bakery_ai_manager.firestore_client import get_firestore_client
 from google.cloud.firestore_v1.base_query import FieldFilter
+
+
+db = get_firestore_client()
+
+_known_staff_encodings = {}
+_staff_names_by_id = {}
+
+@api_view(["POST"])
+def add_staff(request):
+    """
+    API endpoint to add a new staff member.
+    Face encoding part is disabled for the lite version.
+    """
+    required_fields = ["name", "role", "contact_number", "salary"] 
+    for field in required_fields:
+        if field not in request.data:
+            return Response(
+                {"error": f"Missing required field: {field}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+    staff_name = request.data.get("name").strip()
+    staff_id = staff_name.lower().replace(" ", "_") + "_" + str(datetime.now().timestamp()).replace('.', '') 
+    
+    existing_doc = db.collection('staff').document(staff_id).get()
+    if existing_doc.exists:
+        return Response({"error": f"Staff member '{staff_name}' (ID: {staff_id}) already exists."}, status=status.HTTP_409_CONFLICT)
+
+    # --- FIX: Face encoding generation is skipped ---
+    image_urls = request.data.get("image_urls", [])
+    
+    staff_data = {
+        "name": staff_name,
+        "role": request.data.get("role"),
+        "contact_number": request.data.get("contact_number"),
+        "address": request.data.get("address", ""),
+        "emergency_contact": request.data.get("emergency_contact", ""),
+        "image_urls": image_urls, 
+        "face_encodings": [], # Store an empty list
+        "location_id": request.data.get("location_id", ""), 
+        "salary": float(request.data.get("salary")), 
+        "created_at": datetime.now().isoformat()
+    }
+
+    try:
+        db.collection('staff').document(staff_id).set(staff_data)
+        # _load_known_staff_encodings() # No need to reload cache
+        print(f"DEBUG: Added new staff member '{staff_name}' with ID: {staff_id} to location {staff_data['location_id']}")
+        return Response(
+            {"message": "Staff member added successfully", "staff_id": staff_id},
+            status=status.HTTP_201_CREATED
+        )
+    except Exception as e:
+        print(f"ERROR: Failed to add staff member: {e}")
+        return Response(
+            {"error": "Failed to add staff member", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["GET"])
+def list_staff(request):
+    query = db.collection('staff')
+    location_id = request.GET.get('location_id')
+    if location_id:
+        query = query.where(filter=FieldFilter('location_id', '==', location_id))
+    
+    staff_list = []
+    try:
+        docs = query.order_by('name').stream() 
+        for doc in docs:
+            staff_data = doc.to_dict()
+            staff_data['id'] = doc.id 
+            if 'face_encodings' in staff_data:
+                del staff_data['face_encodings'] 
+            staff_list.append(staff_data)
+        return Response(staff_list, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({"error": f"Failed to list staff: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
+@api_view(["DELETE"])
+def delete_staff(request, staff_id):
+    if not staff_id:
+        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+    staff_doc_ref = db.collection('staff').document(staff_id)
+    try:
+        doc = staff_doc_ref.get()
+        if not doc.exists:
+            return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        staff_doc_ref.delete()
+        # _load_known_staff_encodings() # No need to reload cache
+        print(f"DEBUG: Deleted staff member with ID: {staff_id}")
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    except Exception as e:
+        print(f"ERROR: Failed to delete staff member: {e}")
+        return Response(
+            {"error": "Failed to delete staff member", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+@api_view(["POST"])
+def punch_attendance(request):
+    staff_id = request.data.get('staff_id')
+    punch_type = request.data.get('type') 
+    
+    if not staff_id or not punch_type:
+        return Response({"error": "Missing staff_id or punch_type"}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if punch_type not in ['clock_in', 'clock_out']:
+        return Response({"error": "Invalid punch_type. Must be 'clock_in' or 'clock_out'"}, status=status.HTTP_400_BAD_REQUEST)
+
+    staff_doc = db.collection('staff').document(staff_id).get()
+    if not staff_doc.exists:
+        return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    # --- NEW: Robustness Check ---
+    if punch_type == 'clock_out':
+        try:
+            # Find the very last punch for this staff member
+            last_punch_query = db.collection('attendance_records').where(
+                filter=FieldFilter('staff_id', '==', staff_id)
+            ).order_by('timestamp', direction='DESCENDING').limit(1)
+            
+            last_punch_docs = list(last_punch_query.stream())
+
+            if last_punch_docs:
+                last_punch = last_punch_docs[0].to_dict()
+                # Check if their last action was a clock_in
+                if last_punch.get('punch_type') == 'clock_in':
+                    last_punch_date = datetime.fromisoformat(last_punch['timestamp']).date()
+                    today_date = datetime.now().date()
+                    # If the clock_in was not today, prevent clock_out
+                    if last_punch_date != today_date:
+                        return Response({
+                            "error": f"You forgot to clock out on {last_punch_date.strftime('%Y-%m-%d')}. Please contact a manager to fix your attendance."
+                        }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(f"Error checking last punch: {e}")
+            # Allow proceeding but log the error, or return a specific check error
+            pass # Or return a server error response
+
+    attendance_data = {
+        "staff_id": staff_id,
+        "staff_name": staff_doc.to_dict().get('name', 'Unknown'), 
+        "punch_type": punch_type,
+        "timestamp": datetime.now().isoformat(),
+        "date": datetime.now().date().isoformat(),
+        "location_id": request.data.get('location_id', 'vailathur_cafe')
+    }
+
+    try:
+        attendance_ref = db.collection('attendance_records')
+        update_time, doc_ref = attendance_ref.add(attendance_data)
+        print(f"DEBUG: Recorded attendance for {staff_id}: {punch_type} at {attendance_data['timestamp']}")
+        return Response(
+            {"message": "Attendance punched successfully", "punch_id": doc_ref.id},
+            status=status.HTTP_201_CREATED
+        )
+    except Exception as e:
+        print(f"ERROR: Failed to punch attendance: {e}")
+        return Response(
+            {"error": "Failed to punch attendance", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+
+@api_view(["GET"])
+def get_cctv_observation_report(request): 
+    # This function can remain as is, it will just return empty data
+    # since no new observations can be logged.
+    return Response({"report": "CCTV reporting is disabled in this version.", "structured_data": {}}, status=status.HTTP_200_OK)
+@api_view(["GET"])
+def get_staff_attendance_report(request):
+    staff_id = request.GET.get('staff_id')
+    start_date_str = request.GET.get('start_date')
+    end_date_str = request.GET.get('end_date')
+
+    # 1. Fetch all staff details first (name, daily salary)
+    staff_details = {}
+    try:
+        staff_query = db.collection('staff')
+        if staff_id and staff_id != 'All Staff':
+            doc = staff_query.document(staff_id).get()
+            if doc.exists:
+                 staff_details[doc.id] = doc.to_dict()
+        else:
+            for doc in staff_query.stream():
+                staff_details[doc.id] = doc.to_dict()
+    except Exception as e:
+        return Response({"error": f"Could not fetch staff data: {e}"}, status=500)
+
+    # 2. Get all attendance punches in the date range
+    attendance_punches = {}
+    try:
+        attendance_query = db.collection('attendance_records').order_by('timestamp')
+        if start_date_str:
+            attendance_query = attendance_query.where(filter=FieldFilter('date', '>=', start_date_str))
+        if end_date_str:
+            attendance_query = attendance_query.where(filter=FieldFilter('date', '<=', end_date_str))
+
+        for doc in attendance_query.stream():
+            record = doc.to_dict()
+            s_id = record.get('staff_id')
+            if s_id not in attendance_punches:
+                attendance_punches[s_id] = []
+            attendance_punches[s_id].append(record)
+    except Exception as e:
+        return Response({"error": f"Failed to retrieve attendance records: {e}"}, status=500)
+
+    # 3. Process data for each staff member
+    salary_report_list = []
+    
+    for s_id, details in staff_details.items():
+        punches = attendance_punches.get(s_id, [])
+        present_days = set()
+        total_duration = timedelta()
+        clock_in_time = None
+
+        for punch in punches:
+            present_days.add(punch.get('date'))
+            punch_time = datetime.fromisoformat(punch['timestamp'])
+            punch_type = punch['punch_type']
+
+            if punch_type == 'clock_in':
+                clock_in_time = punch_time
+            elif punch_type == 'clock_out' and clock_in_time:
+                total_duration += punch_time - clock_in_time
+                clock_in_time = None
+        
+        days_present = len(present_days)
+        total_hours_worked = total_duration.total_seconds() / 3600
+        daily_salary = float(details.get('salary', 0.0))
+        salary_due = daily_salary * days_present
+
+        # 4. Check if this salary period has already been paid
+        payment_doc_id = f"{s_id}_{start_date_str}_{end_date_str}"
+        payment_doc = db.collection('salary_payments').document(payment_doc_id).get()
+
+        salary_report_list.append({
+            "staff_id": s_id,
+            "staff_name": details.get("name", "Unknown"),
+            "total_days_present": days_present,
+            "total_hours_worked": round(total_hours_worked, 2), # New field
+            "total_salary_due": round(salary_due, 2),
+            "is_paid": payment_doc.exists
+        })
+        
+    return Response(salary_report_list, status=status.HTTP_200_OK)
+# --- NEW FUNCTION ---
+@api_view(["POST"])
+def mark_salary_as_paid(request):
+    data = request.data
+    staff_id = data.get('staff_id')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    amount = data.get('amount')
+    status = data.get('status') # This will be True to pay, False to un-pay
+
+    if not all([staff_id, start_date, end_date, amount is not None, status is not None]):
+        return Response({"error": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
+
+    payment_doc_id = f"{staff_id}_{start_date}_{end_date}"
+    payment_ref = db.collection('salary_payments').document(payment_doc_id)
+    expense_ref = db.collection('expenses').document(f"salary_{payment_doc_id}")
+    
+    try:
+        if status is True: # If the app is marking the salary as PAID
+            # 1. Create a payment record
+            payment_ref.set({
+                "staff_id": staff_id,
+                "amount": amount,
+                "payment_date": datetime.now().strftime('%Y-%m-%d'),
+                "period_start": start_date,
+                "period_end": end_date,
+                "expense_doc_id": expense_ref.id,
+            })
+            # 2. Create a corresponding expense record for P&L reports
+            expense_ref.set({
+                "category": "Salary",
+                "amount": amount,
+                "date": datetime.now().strftime('%Y-%m-%d'),
+                "description": f"Salary for staff ID {staff_id} for period {start_date} to {end_date}"
+            })
+            return Response({"message": "Salary marked as paid and expense recorded."}, status=status.HTTP_200_OK)
+        
+        else: # If the app is marking the salary as UNPAID
+            # Delete both the payment and the expense record
+            batch = db.batch()
+            batch.delete(payment_ref)
+            batch.delete(expense_ref)
+            batch.commit()
+            return Response({"message": "Salary payment and expense record reverted."}, status=status.HTTP_200_OK)
+            
+    except Exception as e:
+        return Response({"error": f"An error occurred: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+def record_cctv_observation(request):
+    # This function can remain as is, it will just return an error
+    # if called, which is fine since the frontend won't call it.
+    return Response({"error": "CCTV observation is disabled in this version."}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['DELETE'])
+def delete_attendance_logs(request):
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    staff_id = request.GET.get('staff_id')
+
+    if not start_date or not end_date:
+        return Response({'error': 'Start date and end date are required for deletion.'}, status=400)
+    
+    try:
+        query = db.collection('attendance_records').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
+        
+        if staff_id and staff_id != 'All Staff':
+            query = query.where(filter=FieldFilter('staff_id', '==', staff_id))
+
+        docs_to_delete = list(query.stream())
+        
+        if not docs_to_delete:
+            return Response({'message': 'No attendance logs found in the selected range to delete.'}, status=200)
+
+        batch = db.batch()
+        for doc in docs_to_delete:
+            batch.delete(doc.reference)
+        batch.commit()
+
+        return Response({'message': f'Successfully deleted {len(docs_to_delete)} attendance records.'}, status=200)
+
+    except Exception as e:
+        print(f"ERROR deleting attendance logs: {e}")
+        return Response({'error': f'An unexpected error occurred during deletion: {e}'}, status=500)
+
+
+@api_view(["GET"])
+def get_last_punch_status(request, staff_id):
+    if not staff_id:
+        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        query = db.collection('attendance_records').where(
+            filter=FieldFilter('staff_id', '==', staff_id)
+        ).order_by(
+            'timestamp', direction=firestore.Query.DESCENDING
+        ).limit(1)
+
+        docs = list(query.stream())
+
+        if not docs:
+            return Response({"last_punch": "none"}, status=status.HTTP_200_OK)
+        
+        last_punch_record = docs[0].to_dict()
+        return Response({
+            "last_punch": last_punch_record.get('punch_type')
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"ERROR: Failed to get last punch status for {staff_id}: {e}")
+        return Response(
+            {"error": "Failed to retrieve last punch status", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+@api_view(["PUT"])
+def edit_staff(request, staff_id):
+    """
+    API endpoint to edit an existing staff member.
+    """
+    if not staff_id:
+        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    staff_ref = db.collection('staff').document(staff_id)
+    try:
+        if not staff_ref.get().exists:
+            return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data
+        
+        # Prepare the data for updating
+        staff_data = {
+            "name": data.get("name"),
+            "role": data.get("role"),
+            "contact_number": data.get("contact_number"),
+            # Safely handle the salary conversion
+            "salary": float(data.get("salary", 0.0)),
+            "image_urls": data.get("image_urls", []),
+        }
+        
+        # Use .update() to change only the specified fields
+        staff_ref.update(staff_data)
+        
+        return Response({"message": "Staff member updated successfully", "staff_id": staff_id}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"error": f"Failed to update staff member: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # All other imports (storage, face_recognition, etc.) are assumed to be here
 
 # --- FIX: Comment out imports for face recognition ---
@@ -14,9 +414,6 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 # import cv2
 # import requests
 # from google.cloud import storage
-
-
-db = get_firestore_client()
 # --- FIX: Comment out GCS bucket initialization ---
 # GCS_BUCKET_NAME = 'manger-ai-staff-images'
 # try:
@@ -28,9 +425,6 @@ db = get_firestore_client()
 #     gcs_bucket = None
 
 # --- Cache for known staff encodings ---
-_known_staff_encodings = {}
-_staff_names_by_id = {}
-
 # --- FIX: Comment out face encoding helper function ---
 # def _generate_face_encodings(image_urls):
 #     encodings_for_all_images = []
@@ -86,57 +480,6 @@ _staff_names_by_id = {}
 # # Load encodings once at Django server startup
 # _load_known_staff_encodings()
 
-@api_view(["POST"])
-def add_staff(request):
-    """
-    API endpoint to add a new staff member.
-    Face encoding part is disabled for the lite version.
-    """
-    required_fields = ["name", "role", "contact_number", "salary"] 
-    for field in required_fields:
-        if field not in request.data:
-            return Response(
-                {"error": f"Missing required field: {field}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-    staff_name = request.data.get("name").strip()
-    staff_id = staff_name.lower().replace(" ", "_") + "_" + str(datetime.now().timestamp()).replace('.', '') 
-    
-    existing_doc = db.collection('staff').document(staff_id).get()
-    if existing_doc.exists:
-        return Response({"error": f"Staff member '{staff_name}' (ID: {staff_id}) already exists."}, status=status.HTTP_409_CONFLICT)
-
-    # --- FIX: Face encoding generation is skipped ---
-    image_urls = request.data.get("image_urls", [])
-    
-    staff_data = {
-        "name": staff_name,
-        "role": request.data.get("role"),
-        "contact_number": request.data.get("contact_number"),
-        "address": request.data.get("address", ""),
-        "emergency_contact": request.data.get("emergency_contact", ""),
-        "image_urls": image_urls, 
-        "face_encodings": [], # Store an empty list
-        "location_id": request.data.get("location_id", ""), 
-        "salary": float(request.data.get("salary")), 
-        "created_at": datetime.now().isoformat()
-    }
-
-    try:
-        db.collection('staff').document(staff_id).set(staff_data)
-        # _load_known_staff_encodings() # No need to reload cache
-        print(f"DEBUG: Added new staff member '{staff_name}' with ID: {staff_id} to location {staff_data['location_id']}")
-        return Response(
-            {"message": "Staff member added successfully", "staff_id": staff_id},
-            status=status.HTTP_201_CREATED
-        )
-    except Exception as e:
-        print(f"ERROR: Failed to add staff member: {e}")
-        return Response(
-            {"error": "Failed to add staff member", "details": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
 
 # --- FIX: Comment out image upload as it's related to face auth ---
 # @api_view(["POST"])
@@ -163,89 +506,6 @@ def add_staff(request):
 #             {"error": "Failed to upload image", "details": str(e)},
 #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
 #         )
-
-@api_view(["GET"])
-def list_staff(request):
-    query = db.collection('staff')
-    location_id = request.GET.get('location_id')
-    if location_id:
-        query = query.where(filter=FieldFilter('location_id', '==', location_id))
-    
-    staff_list = []
-    try:
-        docs = query.order_by('name').stream() 
-        for doc in docs:
-            staff_data = doc.to_dict()
-            staff_data['id'] = doc.id 
-            if 'face_encodings' in staff_data:
-                del staff_data['face_encodings'] 
-            staff_list.append(staff_data)
-        return Response(staff_list, status=status.HTTP_200_OK)
-    except Exception as e:
-        return Response({"error": f"Failed to list staff: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-
-@api_view(["DELETE"])
-def delete_staff(request, staff_id):
-    if not staff_id:
-        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
-        
-    staff_doc_ref = db.collection('staff').document(staff_id)
-    try:
-        doc = staff_doc_ref.get()
-        if not doc.exists:
-            return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
-            
-        staff_doc_ref.delete()
-        # _load_known_staff_encodings() # No need to reload cache
-        print(f"DEBUG: Deleted staff member with ID: {staff_id}")
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    except Exception as e:
-        print(f"ERROR: Failed to delete staff member: {e}")
-        return Response(
-            {"error": "Failed to delete staff member", "details": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-@api_view(["POST"])
-def punch_attendance(request):
-    staff_id = request.data.get('staff_id')
-    punch_type = request.data.get('type') 
-    
-    if not staff_id or not punch_type:
-        return Response({"error": "Missing staff_id or punch_type"}, status=status.HTTP_400_BAD_REQUEST)
-    
-    if punch_type not in ['clock_in', 'clock_out']:
-        return Response({"error": "Invalid punch_type. Must be 'clock_in' or 'clock_out'"}, status=status.HTTP_400_BAD_REQUEST)
-
-    staff_doc = db.collection('staff').document(staff_id).get()
-    if not staff_doc.exists:
-        return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    attendance_data = {
-        "staff_id": staff_id,
-        "staff_name": staff_doc.to_dict().get('name', 'Unknown'), 
-        "punch_type": punch_type,
-        "timestamp": datetime.now().isoformat(),
-        "date": datetime.now().date().isoformat(),
-        "location_id": request.data.get('location_id', 'vailathur_cafe')
-    }
-
-    try:
-        attendance_ref = db.collection('attendance_records')
-        update_time, doc_ref = attendance_ref.add(attendance_data)
-        print(f"DEBUG: Recorded attendance for {staff_id}: {punch_type} at {attendance_data['timestamp']}")
-        return Response(
-            {"message": "Attendance punched successfully", "punch_id": doc_ref.id},
-            status=status.HTTP_201_CREATED
-        )
-    except Exception as e:
-        print(f"ERROR: Failed to punch attendance: {e}")
-        return Response(
-            {"error": "Failed to punch attendance", "details": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
 # --- FIX: Comment out the entire recognize_face function ---
 # @api_view(["POST"])
 # def recognize_face(request): 
@@ -315,154 +575,3 @@ def punch_attendance(request):
 #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
 #         )
 
-
-@api_view(["GET"])
-def get_cctv_observation_report(request): 
-    # This function can remain as is, it will just return empty data
-    # since no new observations can be logged.
-    return Response({"report": "CCTV reporting is disabled in this version.", "structured_data": {}}, status=status.HTTP_200_OK)
-
-@api_view(["GET"])
-def get_staff_attendance_report(request):
-    staff_id = request.GET.get('staff_id')
-    start_date_str = request.GET.get('start_date')
-    end_date_str = request.GET.get('end_date')
-
-    staff_salaries = {}
-    try:
-        staff_docs = db.collection('staff').stream()
-        for doc in staff_docs:
-            staff_info = doc.to_dict()
-            staff_salaries[doc.id] = {
-                "name": staff_info.get('name', 'Unknown'),
-                "salary": float(staff_info.get('salary', 0.0))
-            }
-    except Exception as e:
-        return Response({"error": f"Could not fetch staff salary data: {e}"}, status=500)
-
-    query = db.collection('attendance_records')
-    if staff_id and staff_id != 'All Staff':
-        query = query.where(filter=FieldFilter('staff_id', '==', staff_id))
-    if start_date_str:
-        query = query.where(filter=FieldFilter('date', '>=', start_date_str))
-    if end_date_str:
-        query = query.where(filter=FieldFilter('date', '<=', end_date_str))
-    
-    query = query.order_by('staff_id').order_by('timestamp')
-
-    attendance_data = {}
-    try:
-        docs = query.stream()
-        for doc in docs:
-            record = doc.to_dict()
-            s_id = record['staff_id']
-            if s_id not in attendance_data:
-                staff_name = staff_salaries.get(s_id, {}).get('name', 'Unknown')
-                attendance_data[s_id] = {
-                    'name': record.get('staff_name', staff_name), 
-                    'punches': []
-                }
-            attendance_data[s_id]['punches'].append(record)
-    except Exception as e:
-        return Response({"error": f"Failed to retrieve attendance records: {e}"}, status=500)
-
-    report_lines = ["Staff Attendance and Salary Report:\n", "----------------------------------\n"]
-    if not attendance_data:
-        report_lines.append("No attendance records found for the selected criteria.")
-    else:
-        sorted_staff_data = sorted(attendance_data.items(), key=lambda item: item[1]['name'])
-        for s_id, data in sorted_staff_data:
-            report_lines.append(f"\nStaff: {data['name']} (ID: {s_id})\n")
-            total_duration = timedelta()
-            clock_in_time = None
-            for punch in data['punches']:
-                punch_time = datetime.fromisoformat(punch['timestamp'])
-                punch_type = punch['punch_type']
-                report_lines.append(f"  - {punch_type.replace('_', ' ').title()} at {punch_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                if punch_type == 'clock_in':
-                    clock_in_time = punch_time
-                elif punch_type == 'clock_out' and clock_in_time:
-                    duration = punch_time - clock_in_time
-                    total_duration += duration
-                    days, remainder = divmod(duration.total_seconds(), 86400)
-                    hours, remainder = divmod(remainder, 3600)
-                    minutes, _ = divmod(remainder, 60)
-                    duration_str = f"{int(days)}d {int(hours)}h {int(minutes)}m"
-                    report_lines.append(f"    (Duration: {duration_str})\n")
-                    clock_in_time = None
-            total_hours_worked = total_duration.total_seconds() / 3600
-            salary_per_hour = staff_salaries.get(s_id, {}).get('salary', 0.0)
-            estimated_salary = total_hours_worked * salary_per_hour
-            report_lines.append(f"  Total Hours Worked in Period: {total_hours_worked:.2f} hours\n")
-            report_lines.append(f"  Hourly Salary: ₹{salary_per_hour:.2f}\n")
-            report_lines.append(f"  Estimated Earnings for Period: ₹{estimated_salary:.2f}\n")
-
-    report_text = "".join(report_lines)
-    return Response({"report": report_text, "structured_data": attendance_data}, status=status.HTTP_200_OK)
-
-@api_view(["POST"])
-def record_cctv_observation(request):
-    # This function can remain as is, it will just return an error
-    # if called, which is fine since the frontend won't call it.
-    return Response({"error": "CCTV observation is disabled in this version."}, status=status.HTTP_404_NOT_FOUND)
-
-@api_view(['DELETE'])
-def delete_attendance_logs(request):
-    start_date = request.GET.get('start_date')
-    end_date = request.GET.get('end_date')
-    staff_id = request.GET.get('staff_id')
-
-    if not start_date or not end_date:
-        return Response({'error': 'Start date and end date are required for deletion.'}, status=400)
-    
-    try:
-        query = db.collection('attendance_records').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
-        
-        if staff_id and staff_id != 'All Staff':
-            query = query.where(filter=FieldFilter('staff_id', '==', staff_id))
-
-        docs_to_delete = list(query.stream())
-        
-        if not docs_to_delete:
-            return Response({'message': 'No attendance logs found in the selected range to delete.'}, status=200)
-
-        batch = db.batch()
-        for doc in docs_to_delete:
-            batch.delete(doc.reference)
-        batch.commit()
-
-        return Response({'message': f'Successfully deleted {len(docs_to_delete)} attendance records.'}, status=200)
-
-    except Exception as e:
-        print(f"ERROR deleting attendance logs: {e}")
-        return Response({'error': f'An unexpected error occurred during deletion: {e}'}, status=500)
-
-
-@api_view(["GET"])
-def get_last_punch_status(request, staff_id):
-    if not staff_id:
-        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        query = db.collection('attendance_records').where(
-            filter=FieldFilter('staff_id', '==', staff_id)
-        ).order_by(
-            'timestamp', direction=firestore.Query.DESCENDING
-        ).limit(1)
-
-        docs = list(query.stream())
-
-        if not docs:
-            return Response({"last_punch": "none"}, status=status.HTTP_200_OK)
-        
-        last_punch_record = docs[0].to_dict()
-        return Response({
-            "last_punch": last_punch_record.get('punch_type')
-        }, status=status.HTTP_200_OK)
-
-    except Exception as e:
-        print(f"ERROR: Failed to get last punch status for {staff_id}: {e}")
-        return Response(
-            {"error": "Failed to retrieve last punch status", "details": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
