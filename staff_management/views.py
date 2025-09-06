@@ -574,3 +574,30 @@ def get_last_punch_status(request, staff_id):
             {"error": "Failed to retrieve last punch status", "details": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+@app.route('/attendance/mark/', methods=['POST', 'OPTIONS'])
+def mark_attendance():
+    # Handle the OPTIONS preflight request for CORS
+    if request.method == 'OPTIONS':
+        # You would add CORS headers here
+        return jsonify({'status': 'ok'}), 200
+
+    # Handle the actual POST request
+    if request.method == 'POST':
+        # Get the JSON data sent from the HTML page
+        data = request.get_json()
+        
+        # Extract the date and the list of attendance records
+        attendance_date = data.get('date')
+        attendance_records = data.get('attendance')
+
+        # --- Your Logic Here ---
+        # 1. Loop through attendance_records.
+        # 2. For each record, save the staff_id and status to your database.
+        # 3. Handle any potential errors.
+        
+        print(f"Received attendance for {attendance_date}: {attendance_records}")
+
+        # Send a success response back to the HTML page
+        return jsonify({'message': 'Attendance recorded successfully!'}), 200
+
