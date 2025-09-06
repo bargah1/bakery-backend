@@ -222,6 +222,32 @@ def punch_attendance(request):
     if not staff_doc.exists:
         return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
 
+    # --- NEW: Robustness Check ---
+    if punch_type == 'clock_out':
+        try:
+            # Find the very last punch for this staff member
+            last_punch_query = db.collection('attendance_records').where(
+                filter=FieldFilter('staff_id', '==', staff_id)
+            ).order_by('timestamp', direction='DESCENDING').limit(1)
+            
+            last_punch_docs = list(last_punch_query.stream())
+
+            if last_punch_docs:
+                last_punch = last_punch_docs[0].to_dict()
+                # Check if their last action was a clock_in
+                if last_punch.get('punch_type') == 'clock_in':
+                    last_punch_date = datetime.fromisoformat(last_punch['timestamp']).date()
+                    today_date = datetime.now().date()
+                    # If the clock_in was not today, prevent clock_out
+                    if last_punch_date != today_date:
+                        return Response({
+                            "error": f"You forgot to clock out on {last_punch_date.strftime('%Y-%m-%d')}. Please contact a manager to fix your attendance."
+                        }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(f"Error checking last punch: {e}")
+            # Allow proceeding but log the error, or return a specific check error
+            pass # Or return a server error response
+
     attendance_data = {
         "staff_id": staff_id,
         "staff_name": staff_doc.to_dict().get('name', 'Unknown'), 
@@ -245,6 +271,7 @@ def punch_attendance(request):
             {"error": "Failed to punch attendance", "details": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
 @api_view(["PUT"])
 def edit_staff(request, staff_id):
     """
