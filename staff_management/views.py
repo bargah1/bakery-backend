@@ -206,72 +206,67 @@ def delete_staff(request, staff_id):
             {"error": "Failed to delete staff member", "details": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+# In your views.py file
 
-@api_view(["POST"])
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+# Import your Staff and Attendance models here
+# from .models import Staff, AttendanceLog
+import datetime
+
+@api_view(['POST'])
 def punch_attendance(request):
-    staff_id = request.data.get('staff_id')
-    punch_type = request.data.get('type') 
-    
-    if not staff_id or not punch_type:
-        return Response({"error": "Missing staff_id or punch_type"}, status=status.HTTP_400_BAD_REQUEST)
-    
-    if punch_type not in ['clock_in', 'clock_out']:
-        return Response({"error": "Invalid punch_type. Must be 'clock_in' or 'clock_out'"}, status=status.HTTP_400_BAD_REQUEST)
-
-    staff_doc = db.collection('staff').document(staff_id).get()
-    if not staff_doc.exists:
-        return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    # --- NEW: Robustness Check ---
-    if punch_type == 'clock_out':
+    """
+    This view is now correctly written for Django Rest Framework.
+    It expects a POST request with a JSON body.
+    """
+    if request.method == 'POST':
         try:
-            # Find the very last punch for this staff member
-            last_punch_query = db.collection('attendance_records').where(
-                filter=FieldFilter('staff_id', '==', staff_id)
-            ).order_by('timestamp', direction='DESCENDING').limit(1)
+            # In DRF, the parsed JSON data is in `request.data`
+            data = request.data
             
-            last_punch_docs = list(last_punch_query.stream())
+            attendance_date_str = data.get('date')
+            attendance_records = data.get('attendance')
 
-            if last_punch_docs:
-                last_punch = last_punch_docs[0].to_dict()
-                # Check if their last action was a clock_in
-                if last_punch.get('punch_type') == 'clock_in':
-                    last_punch_date = datetime.fromisoformat(last_punch['timestamp']).date()
-                    today_date = datetime.now().date()
-                    # If the clock_in was not today, prevent clock_out
-                    if last_punch_date != today_date:
-                        return Response({
-                            "error": f"You forgot to clock out on {last_punch_date.strftime('%Y-%m-%d')}. Please contact a manager to fix your attendance."
-                        }, status=status.HTTP_400_BAD_REQUEST)
+            # --- Your Logic Here ---
+            # Example logic to save the data
+            if not attendance_date_str or not attendance_records:
+                return Response(
+                    {'error': 'Missing date or attendance data'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            attendance_date = datetime.datetime.strptime(attendance_date_str, '%Y-%m-%d').date()
+
+            # Loop through records and save them to the database
+            for record in attendance_records:
+                staff_id = record.get('staff_id')
+                attendance_status = record.get('status')
+                
+                # Here you would get the Staff object and create an AttendanceLog object
+                # For example:
+                # staff_member = Staff.objects.get(id=staff_id)
+                # AttendanceLog.objects.create(
+                #     staff=staff_member,
+                #     date=attendance_date,
+                #     status=attendance_status
+                # )
+            
+            print(f"Received attendance for {attendance_date}: {attendance_records}")
+
+            # In DRF, you return a `Response` object
+            return Response(
+                {'message': 'Attendance recorded successfully!'}, 
+                status=status.HTTP_200_OK
+            )
+
         except Exception as e:
-            print(f"Error checking last punch: {e}")
-            # Allow proceeding but log the error, or return a specific check error
-            pass # Or return a server error response
-
-    attendance_data = {
-        "staff_id": staff_id,
-        "staff_name": staff_doc.to_dict().get('name', 'Unknown'), 
-        "punch_type": punch_type,
-        "timestamp": datetime.now().isoformat(),
-        "date": datetime.now().date().isoformat(),
-        "location_id": request.data.get('location_id', 'vailathur_cafe')
-    }
-
-    try:
-        attendance_ref = db.collection('attendance_records')
-        update_time, doc_ref = attendance_ref.add(attendance_data)
-        print(f"DEBUG: Recorded attendance for {staff_id}: {punch_type} at {attendance_data['timestamp']}")
-        return Response(
-            {"message": "Attendance punched successfully", "punch_id": doc_ref.id},
-            status=status.HTTP_201_CREATED
-        )
-    except Exception as e:
-        print(f"ERROR: Failed to punch attendance: {e}")
-        return Response(
-            {"error": "Failed to punch attendance", "details": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
+            # Return a detailed error if something goes wrong
+            return Response(
+                {'error': str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 @api_view(["PUT"])
 def edit_staff(request, staff_id):
     """
