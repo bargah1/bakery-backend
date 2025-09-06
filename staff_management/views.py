@@ -245,6 +245,38 @@ def punch_attendance(request):
             {"error": "Failed to punch attendance", "details": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+@api_view(["PUT"])
+def edit_staff(request, staff_id):
+    """
+    API endpoint to edit an existing staff member.
+    """
+    if not staff_id:
+        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    staff_ref = db.collection('staff').document(staff_id)
+    try:
+        if not staff_ref.get().exists:
+            return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data
+        
+        # Prepare the data for updating
+        staff_data = {
+            "name": data.get("name"),
+            "role": data.get("role"),
+            "contact_number": data.get("contact_number"),
+            # Safely handle the salary conversion
+            "salary": float(data.get("salary", 0.0)),
+            "image_urls": data.get("image_urls", []),
+        }
+        
+        # Use .update() to change only the specified fields
+        staff_ref.update(staff_data)
+        
+        return Response({"message": "Staff member updated successfully", "staff_id": staff_id}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"error": f"Failed to update staff member: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # --- FIX: Comment out the entire recognize_face function ---
 # @api_view(["POST"])
