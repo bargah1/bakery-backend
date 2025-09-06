@@ -3,270 +3,366 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Asthana Bakery - Staff Attendance</title>
+    <title>Asthana Bakery - Staff Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
+    
     <style>
-        :root {
-            --primary-color: #6A0B0B;
-            --light-gray: #f4f4f4;
-            --gray-text: #555;
-            --border-color: #ddd;
-            --success-green: #28a745;
-            --light-green: #e9f5ec;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--light-gray);
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            min-height: 100vh;
-        }
-
-        .container {
+        body { font-family: 'Inter', sans-serif; background-color: #FEF2F2; /* red-50 */ }
+        .tab-button { transition: all 0.3s; border-bottom: 4px solid transparent; padding: 1rem; font-weight: 600; color: #4B5563; }
+        .tab-button.active { border-color: #6A0B0B; color: #6A0B0B; background-color: #FEE2E2; /* red-100 */ }
+        .modal-bg { background-color: rgba(0,0,0,0.5); }
+        input, select, textarea {
+            border: 1px solid #D1D5DB; /* gray-300 */
+            border-radius: 0.5rem; /* rounded-lg */
+            padding: 0.75rem;
             width: 100%;
-            max-width: 700px;
-            background-color: #fff;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            transition: all 0.2s;
         }
-
-        h1 {
-            color: var(--primary-color);
-            text-align: center;
-            margin-top: 0;
-            margin-bottom: 10px;
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #6A0B0B; 
+            box-shadow: 0 0 0 2px #FCA5A5; /* red-300 */
         }
-
-        .date-display {
-            text-align: center;
-            color: var(--gray-text);
-            font-size: 1.1em;
-            margin-bottom: 25px;
-            font-weight: 500;
-        }
-
-        #search-input {
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 20px;
-            font-size: 1em;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            box-sizing: border-box;
-        }
-
-        .staff-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            margin-bottom: 12px;
-            transition: all 0.3s ease;
-        }
-        
-        .staff-item.marked-present {
-            background-color: var(--light-green);
-            border-left: 5px solid var(--success-green);
-        }
-
-        .staff-name {
-            font-size: 1.2em;
-            font-weight: 600;
-            color: #333;
-        }
-
-        .attendance-options { display: flex; gap: 10px; }
+        .search-input-container { position: relative; }
         .attendance-options input[type="radio"] { display: none; }
         .attendance-options label {
-            padding: 8px 16px;
-            border: 1px solid var(--primary-color);
-            color: var(--primary-color);
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.2s ease-in-out;
+            padding: 8px 16px; border: 1px solid #6A0B0B; color: #6A0B0B;
+            border-radius: 20px; cursor: pointer; transition: all 0.2s ease-in-out;
             font-weight: 500;
         }
-        .attendance-options input[type="radio"]:checked + label {
-            background-color: var(--primary-color);
-            color: #fff;
-        }
-
-        #submit-btn {
-            width: 100%;
-            padding: 15px;
-            font-size: 1.2em;
-            font-weight: bold;
-            color: #fff;
-            background-color: var(--primary-color);
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            margin-top: 20px;
-        }
-        
-        #submit-btn:disabled {
-            background-color: #ccc;
-            cursor: not-allowed;
-        }
-
-        #message {
-            text-align: center;
-            margin-top: 15px;
-            font-weight: bold;
-            min-height: 20px;
-        }
-        
-        .message-success { color: var(--success-green); }
-        .message-error { color: red; }
-        .message-info { color: var(--gray-text); }
-
-        @media (max-width: 600px) {
-            body { padding: 10px; }
-            .container { padding: 15px; }
-            .staff-item { flex-direction: column; align-items: flex-start; gap: 15px; }
-        }
+        .attendance-options input[type="radio"]:checked + label { background-color: #6A0B0B; color: #fff; }
     </style>
 </head>
-<body>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto bg-white rounded-2xl shadow-2xl p-6 md:p-8">
+        
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-[#6A0B0B]">Staff Management & Attendance</h1>
+            <p class="text-gray-500 mt-2">Mark daily attendance, manage staff, and view reports.</p>
+        </div>
 
-    <div class="container">
-        <h1>Staff Daily Attendance</h1>
-        <p class="date-display" id="current-date"></p>
-        <input type="text" id="search-input" placeholder="Search for staff...">
-        <div id="staff-list-container"></div>
-        <p id="message"></p>
-        <button id="submit-btn" disabled>Submit Attendance</button>
+        <div class="border-b border-gray-200 mb-6">
+            <nav class="-mb-px flex flex-wrap" aria-label="Tabs">
+                <button onclick="changeTab('attendance')" class="tab-button active" id="tab-attendance"><i class="fas fa-clipboard-user mr-2"></i>Daily Attendance</button>
+                <button onclick="changeTab('manage')" class="tab-button" id="tab-manage"><i class="fas fa-users-cog mr-2"></i>Manage Staff</button>
+                <button onclick="changeTab('report')" class="tab-button" id="tab-report"><i class="fas fa-chart-line mr-2"></i>Attendance Report</button>
+            </nav>
+        </div>
+
+        <main>
+            <div id="content-attendance" class="tab-content">
+                <p class="text-center text-lg font-semibold text-gray-700 mb-4" id="current-date"></p>
+                <input type="text" id="attendance-search" placeholder="Search for staff..." class="w-full max-w-lg mx-auto mb-6 block">
+                <div id="attendance-list-container" class="space-y-3"></div>
+                <button id="submit-btn" class="mt-6 w-full max-w-lg mx-auto block bg-[#6A0B0B] text-white font-bold py-3 px-4 rounded-lg hover:bg-[#500808] text-lg transition">Submit Attendance</button>
+            </div>
+
+            <div id="content-manage" class="tab-content hidden">
+                 <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
+                    <h2 class="text-2xl font-bold text-gray-800">Staff List</h2>
+                    <input type="text" id="manage-search" placeholder="Search staff..." class="w-full md:w-1/3">
+                    <button onclick="showStaffModal()" class="bg-rose-700 text-white font-bold py-2 px-4 rounded-lg hover:bg-rose-800 w-full md:w-auto"><i class="fas fa-plus mr-2"></i>Add New Staff</button>
+                </div>
+                <div id="staff-list-container" class="space-y-2"></div>
+            </div>
+
+            <div id="content-report" class="tab-content hidden">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Generate Report</h2>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end bg-gray-50 p-4 rounded-lg mb-6">
+                    <div>
+                        <label for="start-date" class="block text-sm font-medium text-gray-700">Start Date</label>
+                        <input type="date" id="start-date" class="mt-1">
+                    </div>
+                    <div>
+                        <label for="end-date" class="block text-sm font-medium text-gray-700">End Date</label>
+                        <input type="date" id="end-date" class="mt-1">
+                    </div>
+                    <div>
+                        <label for="staff-select" class="block text-sm font-medium text-gray-700">Staff Member</label>
+                        <select id="staff-select" class="mt-1"></select>
+                    </div>
+                    <button onclick="generateReport()" class="bg-[#6A0B0B] text-white font-bold py-2 px-4 rounded-lg hover:bg-[#500808]">Generate Report</button>
+                </div>
+                <div id="report-results-container">
+                    <p class="text-center text-gray-500">Select filters and generate a report to view data.</p>
+                </div>
+            </div>
+        </main>
     </div>
 
+    <div id="staff-modal" class="modal-bg hidden fixed inset-0 z-50 flex items-center justify-center p-4"></div>
+    <div id="confirm-modal" class="modal-bg hidden fixed inset-0 z-50 flex items-center justify-center p-4"></div>
+    <div id="notification" class="hidden fixed top-5 right-5 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg"></div>
+    <div id="error-notification" class="hidden fixed top-5 right-5 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg"></div>
+
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const API_BASE_URL = 'https://bakery-backend-5qkn.onrender.com';
-            const STAFF_LIST_ENDPOINT = `${API_BASE_URL}/staff/list/`;
-            const SUBMIT_ATTENDANCE_ENDPOINT = `${API_BASE_URL}/punch-attendance/`; // Corrected URL
+        // --- API Configuration ---
+        const API_BASE_URL = 'https://bakery-backend-5qkn.onrender.com';
+        const STAFF_URL = `${API_BASE_URL}/staff`; // Base URL for staff operations
+        
+        // --- State Variables ---
+        let allStaff = [];
 
-            const staffListContainer = document.getElementById('staff-list-container');
-            const submitBtn = document.getElementById('submit-btn');
-            const messageEl = document.getElementById('message');
-            const dateDisplay = document.getElementById('current-date');
-            const searchInput = document.getElementById('search-input');
+        // --- Helper Functions ---
+        function showNotification(message, isError = false) {
+            const el = isError ? document.getElementById('error-notification') : document.getElementById('notification');
+            el.textContent = message;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 3000);
+        }
 
-            const today = new Date();
-            dateDisplay.textContent = today.toLocaleDateString('en-IN', {
+        function changeTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+            document.getElementById(`content-${tabName}`).classList.remove('hidden');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            
+            // Load data for the selected tab
+            if (tabName === 'attendance') loadAttendanceTab();
+            if (tabName === 'manage') loadStaffManagementTab();
+            if (tabName === 'report') loadReportTab();
+        }
+
+        // --- Attendance Tab Logic ---
+        async function loadAttendanceTab() {
+            document.getElementById('current-date').textContent = new Date().toLocaleDateString('en-IN', {
                 weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
             });
+            try {
+                const response = await fetch(`${STAFF_URL}/list/`);
+                if (!response.ok) throw new Error('Failed to fetch staff list');
+                allStaff = await response.json();
+                renderAttendanceList();
+            } catch (error) {
+                showNotification(error.message, true);
+            }
+        }
+        
+        function renderAttendanceList() {
+            const container = document.getElementById('attendance-list-container');
+            const searchTerm = document.getElementById('attendance-search').value.toLowerCase();
+            const filteredStaff = allStaff.filter(s => s.name.toLowerCase().includes(searchTerm));
 
-            async function fetchStaff() {
-                showMessage('Loading staff list...', 'info');
-                try {
-                    const response = await fetch(STAFF_LIST_ENDPOINT);
-                    if (!response.ok) {
-                        throw new Error(`Server responded with status: ${response.status}`);
-                    }
-                    const staffList = await response.json();
-                    renderStaffList(staffList);
-                    submitBtn.disabled = false;
-                    showMessage('', 'info');
-                } catch (error) {
-                    console.error('Fetch Error:', error);
-                    // IMPROVED: Better error message for the user
-                    showMessage('Failed to fetch. Check server is running and CORS is enabled.', 'error');
+            container.innerHTML = filteredStaff.map(staff => `
+                <div class="staff-item-attendance border rounded-lg p-4 flex justify-between items-center" data-staff-id="${staff.id}">
+                    <span class="font-bold text-lg">${staff.name}</span>
+                    <div class="attendance-options">
+                        <input type="radio" id="full-${staff.id}" name="attendance-${staff.id}" value="full_day">
+                        <label for="full-${staff.id}">Full Day</label>
+                        <input type="radio" id="half-${staff.id}" name="attendance-${staff.id}" value="half_day">
+                        <label for="half-${staff.id}">Half Day</label>
+                        <input type="radio" id="absent-${staff.id}" name="attendance-${staff.id}" value="absent" checked>
+                        <label for="absent-${staff.id}">Absent</label>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function submitAttendance() {
+            const attendanceData = [];
+            document.querySelectorAll('.staff-item-attendance').forEach(item => {
+                const staffId = item.dataset.staffId;
+                const selectedOption = item.querySelector(`input[name="attendance-${staffId}"]:checked`);
+                if (selectedOption) {
+                    attendanceData.push({ staff_id: staffId, status: selectedOption.value });
                 }
+            });
+            
+            try {
+                const response = await fetch(`${STAFF_URL}/punch-attendance/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        date: new Date().toISOString().split('T')[0],
+                        attendance: attendanceData
+                    })
+                });
+                if (!response.ok) throw new Error('Server failed to record attendance.');
+                showNotification('Attendance recorded successfully!');
+            } catch (error) {
+                showNotification(error.message, true);
+            }
+        }
+
+        // --- Manage Staff Tab Logic ---
+        async function loadStaffManagementTab() {
+            try {
+                const response = await fetch(`${STAFF_URL}/list/`);
+                if (!response.ok) throw new Error('Failed to fetch staff list');
+                allStaff = await response.json();
+                renderStaffList();
+            } catch (error) {
+                showNotification(error.message, true);
+            }
+        }
+
+        function renderStaffList() {
+            const container = document.getElementById('staff-list-container');
+            const searchTerm = document.getElementById('manage-search').value.toLowerCase();
+            const filteredStaff = allStaff.filter(s => s.name.toLowerCase().includes(searchTerm));
+            
+            container.innerHTML = filteredStaff.map(staff => `
+                <div class="bg-red-50 p-3 rounded-lg flex justify-between items-center">
+                    <div>
+                        <p class="font-bold">${staff.name}</p>
+                        <p class="text-sm text-gray-600">ID: ${staff.id}</p>
+                    </div>
+                    <div>
+                        <button onclick="showStaffModal('${staff.id}')" class="text-rose-700 hover:text-rose-800 mr-4"><i class="fas fa-edit"></i> Edit</button>
+                        <button onclick="confirmDeleteStaff('${staff.id}')" class="text-red-500 hover:text-red-700"><i class="fas fa-trash"></i> Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function showStaffModal(staffId = null) {
+            const staff = staffId ? allStaff.find(s => s.id === staffId) : null;
+            const modal = document.getElementById('staff-modal');
+            modal.innerHTML = `
+                <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+                    <h3 class="text-2xl font-bold mb-4">${staffId ? 'Edit' : 'Add New'} Staff</h3>
+                    <form onsubmit="event.preventDefault(); saveStaff('${staffId || ''}')" class="space-y-4">
+                        <input id="staff-name" type="text" placeholder="Staff Name" value="${staff?.name || ''}" required>
+                        <div class="flex justify-end space-x-4">
+                            <button type="button" onclick="document.getElementById('staff-modal').classList.add('hidden')" class="bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                            <button type="submit" class="bg-rose-700 text-white font-bold py-2 px-4 rounded">Save</button>
+                        </div>
+                    </form>
+                </div>`;
+            modal.classList.remove('hidden');
+        }
+        
+        async function saveStaff(staffId) {
+            const name = document.getElementById('staff-name').value;
+            const url = staffId ? `${STAFF_URL}/edit/${staffId}/` : `${STAFF_URL}/add/`;
+            const method = staffId ? 'PUT' : 'POST';
+            
+            try {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name })
+                });
+                if (!response.ok) throw new Error('Failed to save staff.');
+                showNotification('Staff saved successfully!');
+                document.getElementById('staff-modal').classList.add('hidden');
+                loadStaffManagementTab(); // Refresh list
+            } catch (error) {
+                showNotification(error.message, true);
+            }
+        }
+        
+        function confirmDeleteStaff(staffId) {
+            const modal = document.getElementById('confirm-modal');
+             modal.innerHTML = `
+                <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md text-center">
+                    <h3 class="text-2xl font-bold mb-4">Are you sure?</h3>
+                    <p class="text-gray-600 mb-6">This action cannot be undone.</p>
+                    <div class="flex justify-center space-x-4">
+                        <button onclick="document.getElementById('confirm-modal').classList.add('hidden')" class="bg-gray-500 text-white font-bold py-2 px-6 rounded">Cancel</button>
+                        <button onclick="deleteStaff('${staffId}')" class="bg-red-600 text-white font-bold py-2 px-6 rounded">Delete</button>
+                    </div>
+                </div>`;
+            modal.classList.remove('hidden');
+        }
+
+        async function deleteStaff(staffId) {
+            try {
+                const response = await fetch(`${STAFF_URL}/delete/${staffId}/`, { method: 'DELETE' });
+                if (!response.ok) throw new Error('Failed to delete staff.');
+                showNotification('Staff deleted successfully!');
+                document.getElementById('confirm-modal').classList.add('hidden');
+                loadStaffManagementTab(); // Refresh list
+            } catch (error) {
+                showNotification(error.message, true);
+            }
+        }
+
+        // --- Report Tab Logic ---
+        async function loadReportTab() {
+            try {
+                // Fetch staff only if not already fetched
+                if (allStaff.length === 0) {
+                    const response = await fetch(`${STAFF_URL}/list/`);
+                    if (!response.ok) throw new Error('Failed to fetch staff list');
+                    allStaff = await response.json();
+                }
+                const select = document.getElementById('staff-select');
+                select.innerHTML = '<option value="">All Staff</option>' + allStaff.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+            } catch (error) {
+                showNotification(error.message, true);
+            }
+        }
+        
+        async function generateReport() {
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            const staffId = document.getElementById('staff-select').value;
+            const container = document.getElementById('report-results-container');
+            
+            if (!startDate || !endDate) {
+                showNotification('Please select both a start and end date.', true);
+                return;
             }
             
-            function renderStaffList(staffList) {
-                let html = '';
-                staffList.forEach(staff => {
-                    html += `
-                        <div class="staff-item" data-staff-id="${staff.id}">
-                            <div class="staff-name">${staff.name}</div>
-                            <div class="attendance-options">
-                                <input type="radio" id="full-${staff.id}" name="attendance-${staff.id}" value="full_day" required>
-                                <label for="full-${staff.id}">Full Day</label>
-                                <input type="radio" id="half-${staff.id}" name="attendance-${staff.id}" value="half_day">
-                                <label for="half-${staff.id}">Half Day</label>
-                                <input type="radio" id="absent-${staff.id}" name="attendance-${staff.id}" value="absent" checked>
-                                <label for="absent-${staff.id}">Absent</label>
-                            </div>
-                        </div>`;
-                });
-                staffListContainer.innerHTML = html;
-            }
-
-            function filterStaff() {
-                const searchTerm = searchInput.value.toLowerCase().trim();
-                const staffItems = document.querySelectorAll('.staff-item');
-                staffItems.forEach(item => {
-                    const staffName = item.querySelector('.staff-name').textContent.toLowerCase();
-                    item.style.display = staffName.includes(searchTerm) ? 'flex' : 'none';
-                });
-            }
-
-            async function submitAttendance() {
-                const staffItems = document.querySelectorAll('.staff-item');
-                const attendanceData = [];
-                staffItems.forEach(item => {
-                    const staffId = item.dataset.staffId;
-                    const selectedOption = item.querySelector(`input[name="attendance-${staffId}"]:checked`);
-                    if (selectedOption) {
-                        attendanceData.push({ staff_id: staffId, status: selectedOption.value });
-                    }
-                });
-                
-                showMessage('Submitting...', 'info');
-                submitBtn.disabled = true;
-                
-                try {
-                    const response = await fetch(SUBMIT_ATTENDANCE_ENDPOINT, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            date: today.toISOString().split('T')[0],
-                            attendance: attendanceData
-                        }),
-                    });
-
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.error || `Server error: ${response.status}`);
-                    }
-                    
-                    const result = await response.json();
-                    showMessage(result.message || 'Attendance submitted!', 'success');
-
-                    attendanceData.forEach(item => {
-                        const staffDiv = document.querySelector(`.staff-item[data-staff-id="${item.staff_id}"]`);
-                        if (staffDiv) {
-                            staffDiv.classList.remove('marked-present'); // Reset first
-                            if (item.status === 'full_day' || item.status === 'half_day') {
-                                staffDiv.classList.add('marked-present');
-                            }
-                        }
-                    });
-                    
-                } catch (error) {
-                    console.error('Submit Error:', error);
-                    showMessage(`Error: ${error.message}`, 'error');
-                } finally {
-                    submitBtn.disabled = false;
-                }
+            container.innerHTML = `<p class="text-center text-gray-500">Generating report...</p>`;
+            
+            let url = `${STAFF_URL}/attendance-report/?start_date=${startDate}&end_date=${endDate}`;
+            if (staffId) {
+                url += `&staff_id=${staffId}`;
             }
             
-            function showMessage(msg, type) {
-                messageEl.textContent = msg;
-                messageEl.className = `message-${type || 'info'}`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Failed to fetch report data.');
+                const data = await response.json();
+                renderReport(data);
+            } catch (error) {
+                showNotification(error.message, true);
+                container.innerHTML = `<p class="text-center text-red-500">Could not generate report.</p>`;
             }
+        }
+        
+        function renderReport(data) {
+            const container = document.getElementById('report-results-container');
+            if (data.length === 0) {
+                container.innerHTML = `<p class="text-center text-gray-500">No attendance records found for the selected criteria.</p>`;
+                return;
+            }
+            
+            const table = `
+                <table class="min-w-full bg-white border">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Staff Name</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        ${data.map(rec => `
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap">${new Date(rec.date).toLocaleDateString('en-GB')}</td>
+                                <td class="px-6 py-4 whitespace-nowrap">${rec.staff_name}</td>
+                                <td class="px-6 py-4 whitespace-nowrap">${rec.status.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>`;
+            container.innerHTML = table;
+        }
 
-            searchInput.addEventListener('input', filterStaff);
-            submitBtn.addEventListener('click', submitAttendance);
-            fetchStaff();
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', () => {
+            changeTab('attendance');
+            document.getElementById('attendance-search').addEventListener('input', renderAttendanceList);
+            document.getElementById('submit-btn').addEventListener('click', submitAttendance);
+            document.getElementById('manage-search').addEventListener('input', renderStaffList);
         });
-    </script>
 
+    </script>
 </body>
 </html>

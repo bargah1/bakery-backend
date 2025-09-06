@@ -1,15 +1,27 @@
+# Django and Web Server
 Django
 djangorestframework
 django-cors-headers
 gunicorn
+Flask
+
+# Firebase, Google Cloud & AI Services
 firebase-admin
 google-cloud-storage
 google-generativeai
 google-cloud-translate
 google-cloud-texttospeech
+replicate
+
+# Face Recognition
+face-recognition
+opencv-python
+Pillow
+
+# Speech-to-Text
+openai-whisper
+
+# Utilities
 numpy
 requests
-Pillow
 python-dotenv
-Flask
-replicate
