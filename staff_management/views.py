@@ -166,6 +166,9 @@ def add_staff(request):
 
 @api_view(["GET"])
 def list_staff(request):
+    # --- Get today's date in YYYY-MM-DD format ---
+    today_str = date.today().strftime("%Y-%m-%d")
+
     query = db.collection('staff')
     location_id = request.GET.get('location_id')
     if location_id:
@@ -173,47 +176,36 @@ def list_staff(request):
     
     staff_list = []
     try:
-        docs = query.order_by('name').stream() 
+        docs = query.order_by('name').stream()
         for doc in docs:
             staff_data = doc.to_dict()
-            staff_data['id'] = doc.id 
+            staff_data['id'] = doc.id
             if 'face_encodings' in staff_data:
-                del staff_data['face_encodings'] 
+                del staff_data['face_encodings']
+            
+            # --- For each staff, find today's attendance log ---
+            attendance_query = db.collection('attendance') \
+                .where(filter=FieldFilter('staff_id', '==', doc.id)) \
+                .where(filter=FieldFilter('date', '==', today_str)) \
+                .limit(1)
+            
+            attendance_docs = list(attendance_query.stream())
+            
+            # --- Add the status to the response data ---
+            if attendance_docs:
+                # If a log is found, use its status
+                staff_data['today_status'] = attendance_docs[0].to_dict().get('status', 'absent')
+            else:
+                # If no log is found, they are absent
+                staff_data['today_status'] = 'absent'
+
             staff_list.append(staff_data)
+            
         return Response(staff_list, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({"error": f"Failed to list staff: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
 
-@api_view(["DELETE"])
-def delete_staff(request, staff_id):
-    if not staff_id:
-        return Response({"error": "Staff ID is required"}, status=status.HTTP_400_BAD_REQUEST)
-        
-    staff_doc_ref = db.collection('staff').document(staff_id)
-    try:
-        doc = staff_doc_ref.get()
-        if not doc.exists:
-            return Response({"error": "Staff member not found"}, status=status.HTTP_404_NOT_FOUND)
-            
-        staff_doc_ref.delete()
-        # _load_known_staff_encodings() # No need to reload cache
-        print(f"DEBUG: Deleted staff member with ID: {staff_id}")
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    except Exception as e:
-        print(f"ERROR: Failed to delete staff member: {e}")
-        return Response(
-            {"error": "Failed to delete staff member", "details": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
 # In your views.py file
-
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from rest_framework import status
-# Import your Staff and Attendance models here
-# from .models import Staff, AttendanceLog
-import datetime
 
 @api_view(['POST'])
 def punch_attendance(request):
