@@ -575,7 +575,7 @@ def get_last_punch_status(request, staff_id):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-@app.route('/attendance/mark/', methods=['POST', 'OPTIONS'])
+@api_view(["POST"])
 def mark_attendance():
     # Handle the OPTIONS preflight request for CORS
     if request.method == 'OPTIONS':
