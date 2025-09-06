@@ -67,10 +67,9 @@
             border: 1px solid var(--border-color);
             border-radius: 8px;
             margin-bottom: 12px;
-            transition: all 0.3s ease; /* Smooth transition for color change */
+            transition: all 0.3s ease;
         }
         
-        /* --- NEW: Styling for marked attendance --- */
         .staff-item.marked-present {
             background-color: var(--light-green);
             border-left: 5px solid var(--success-green);
@@ -149,7 +148,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             const API_BASE_URL = 'https://bakery-backend-5qkn.onrender.com';
             const STAFF_LIST_ENDPOINT = `${API_BASE_URL}/staff/list/`;
-            const SUBMIT_ATTENDANCE_ENDPOINT = `${API_BASE_URL}/attendance/mark/`;
+            const SUBMIT_ATTENDANCE_ENDPOINT = `${API_BASE_URL}/punch-attendance/`; // Corrected URL
 
             const staffListContainer = document.getElementById('staff-list-container');
             const submitBtn = document.getElementById('submit-btn');
@@ -163,26 +162,24 @@
             });
 
             async function fetchStaff() {
-                // ... fetchStaff logic remains the same ...
                 showMessage('Loading staff list...', 'info');
                 try {
                     const response = await fetch(STAFF_LIST_ENDPOINT);
-                    const contentType = response.headers.get("content-type");
-                    if (!response.ok || !contentType || !contentType.includes("application/json")) {
-                        throw new Error(`Server returned an invalid response. Check API URL.`);
+                    if (!response.ok) {
+                        throw new Error(`Server responded with status: ${response.status}`);
                     }
                     const staffList = await response.json();
                     renderStaffList(staffList);
                     submitBtn.disabled = false;
                     showMessage('', 'info');
                 } catch (error) {
-                    console.error('Failed to fetch staff:', error);
-                    showMessage(error.message, 'error');
+                    console.error('Fetch Error:', error);
+                    // IMPROVED: Better error message for the user
+                    showMessage('Failed to fetch. Check server is running and CORS is enabled.', 'error');
                 }
             }
             
             function renderStaffList(staffList) {
-                // ... renderStaffList logic remains the same ...
                 let html = '';
                 staffList.forEach(staff => {
                     html += `
@@ -202,7 +199,6 @@
             }
 
             function filterStaff() {
-                // ... filterStaff logic remains the same ...
                 const searchTerm = searchInput.value.toLowerCase().trim();
                 const staffItems = document.querySelectorAll('.staff-item');
                 staffItems.forEach(item => {
@@ -211,19 +207,14 @@
                 });
             }
 
-            // --- FIXED: The complete submitAttendance function ---
             async function submitAttendance() {
                 const staffItems = document.querySelectorAll('.staff-item');
                 const attendanceData = [];
-                
                 staffItems.forEach(item => {
                     const staffId = item.dataset.staffId;
                     const selectedOption = item.querySelector(`input[name="attendance-${staffId}"]:checked`);
                     if (selectedOption) {
-                        attendanceData.push({
-                            staff_id: staffId,
-                            status: selectedOption.value,
-                        });
+                        attendanceData.push({ staff_id: staffId, status: selectedOption.value });
                     }
                 });
                 
@@ -242,24 +233,24 @@
 
                     if (!response.ok) {
                         const errorData = await response.json();
-                        throw new Error(errorData.error || 'Server responded with an error.');
+                        throw new Error(errorData.error || `Server error: ${response.status}`);
                     }
                     
                     const result = await response.json();
-                    showMessage(result.message || 'Attendance submitted successfully!', 'success');
+                    showMessage(result.message || 'Attendance submitted!', 'success');
 
-                    // --- NEW: Add green highlight after successful submission ---
                     attendanceData.forEach(item => {
-                        if (item.status === 'full_day' || item.status === 'half_day') {
-                            const staffDiv = document.querySelector(`.staff-item[data-staff-id="${item.staff_id}"]`);
-                            if (staffDiv) {
+                        const staffDiv = document.querySelector(`.staff-item[data-staff-id="${item.staff_id}"]`);
+                        if (staffDiv) {
+                            staffDiv.classList.remove('marked-present'); // Reset first
+                            if (item.status === 'full_day' || item.status === 'half_day') {
                                 staffDiv.classList.add('marked-present');
                             }
                         }
                     });
                     
                 } catch (error) {
-                    console.error('Failed to submit attendance:', error);
+                    console.error('Submit Error:', error);
                     showMessage(`Error: ${error.message}`, 'error');
                 } finally {
                     submitBtn.disabled = false;
