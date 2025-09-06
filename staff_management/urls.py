@@ -25,5 +25,6 @@ urlpatterns = [
     path('cctv-observation-report/', views.get_cctv_observation_report, name='cctv_observation_report'),
     path('staff/salary/mark-paid/', views.mark_salary_as_paid, name='mark_salary_paid'),
     path('staff/edit/<str:staff_id>/', views.edit_staff, name='edit_staff'),
+    path('attendance/mark/', views.punch_attendance, name='punch_attendance'),
 
 ]
