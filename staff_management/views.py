@@ -209,57 +209,66 @@ def delete_staff(request, staff_id):
 @api_view(['POST'])
 def punch_attendance(request):
     """
-    Efficiently marks attendance using update_or_create to prevent timeouts.
+    Records attendance directly to Google Firestore.
     """
-    if request.method == 'POST':
-        try:
-            data = request.data
-            attendance_date_str = data.get('date')
-            attendance_records = data.get('attendance')
+    try:
+        data = request.data
+        attendance_date_str = data.get('date')
+        attendance_records = data.get('attendance')
 
-            if not attendance_date_str or not attendance_records:
-                return Response(
-                    {'error': 'Missing date or attendance data'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            attendance_date = datetime.datetime.strptime(attendance_date_str, '%Y-%m-%d').date()
-
-            # Loop through records and efficiently save them
-            for record in attendance_records:
-                staff_id = record.get('staff_id')
-                attendance_status = record.get('status')
-
-                # Get the staff instance once
-                try:
-                    staff_member = Staff.objects.get(id=staff_id)
-                except Staff.DoesNotExist:
-                    # Log if a staff member wasn't found and skip them
-                    logger.warning(f"Staff with ID {staff_id} not found. Skipping.")
-                    continue
-
-                # The efficient way: find a log for this staff and date,
-                # then update it or create it.
-                AttendanceLog.objects.update_or_create(
-                    staff=staff_member,
-                    date=attendance_date,
-                    defaults={'status': attendance_status}
-                )
-
+        if not attendance_date_str or not attendance_records:
             return Response(
-                {'message': 'Attendance recorded successfully!'},
-                status=status.HTTP_200_OK
+                {'error': 'Missing date or attendance data'},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
-        except Exception as e:
-            # Log the actual error to the server console for debugging
-            logger.error(f"An error occurred in punch_attendance: {e}", exc_info=True)
+        # Get a reference to the Firestore database
+        db = firestore.client()
+
+        # Use a batch write for efficiency
+        batch = db.batch()
+
+        for record in attendance_records:
+            staff_id = record.get('staff_id')
+            attendance_status = record.get('status')
             
-            # Return a generic error to the user
-            return Response(
-                {'error': 'An internal server error occurred.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            if not staff_id or not attendance_status:
+                continue # Skip malformed records
+
+            # Create a unique document ID for each attendance entry
+            # e.g., "staffId_2025-09-07"
+            doc_id = f"{staff_id}_{attendance_date_str}"
+            
+            # Get a reference to the document we want to create or update
+            # This is the Firestore equivalent of "update_or_create"
+            doc_ref = db.collection('attendance').document(doc_id)
+            
+            # Prepare the data to be saved
+            data_to_save = {
+                'staff_id': staff_id,
+                'date': attendance_date_str,
+                'status': attendance_status,
+                'timestamp': firestore.SERVER_TIMESTAMP # Adds a server timestamp
+            }
+            
+            # Add the operation to the batch. 
+            # The .set() method will create the document or overwrite it if it exists.
+            batch.set(doc_ref, data_to_save)
+
+        # Commit all the changes at once
+        batch.commit()
+
+        return Response(
+            {'message': 'Attendance recorded successfully in Firebase!'},
+            status=status.HTTP_200_OK
+        )
+
+    except Exception as e:
+        logger.error(f"Firebase error in punch_attendance: {e}", exc_info=True)
+        return Response(
+            {'error': 'An internal server error occurred while contacting Firebase.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 @api_view(["PUT"])
 def edit_staff(request, staff_id):
