@@ -209,55 +209,58 @@ def delete_staff(request, staff_id):
 @api_view(['POST'])
 def punch_attendance(request):
     """
-    This view is now correctly written for Django Rest Framework.
-    It expects a POST request with a JSON body.
+    Efficiently marks attendance using update_or_create to prevent timeouts.
     """
     if request.method == 'POST':
         try:
-            # In DRF, the parsed JSON data is in `request.data`
             data = request.data
-            
             attendance_date_str = data.get('date')
             attendance_records = data.get('attendance')
 
-            # --- Your Logic Here ---
-            # Example logic to save the data
             if not attendance_date_str or not attendance_records:
                 return Response(
-                    {'error': 'Missing date or attendance data'}, 
+                    {'error': 'Missing date or attendance data'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             attendance_date = datetime.datetime.strptime(attendance_date_str, '%Y-%m-%d').date()
 
-            # Loop through records and save them to the database
+            # Loop through records and efficiently save them
             for record in attendance_records:
                 staff_id = record.get('staff_id')
                 attendance_status = record.get('status')
-                
-                # Here you would get the Staff object and create an AttendanceLog object
-                # For example:
-                # staff_member = Staff.objects.get(id=staff_id)
-                # AttendanceLog.objects.create(
-                #     staff=staff_member,
-                #     date=attendance_date,
-                #     status=attendance_status
-                # )
-            
-            print(f"Received attendance for {attendance_date}: {attendance_records}")
 
-            # In DRF, you return a `Response` object
+                # Get the staff instance once
+                try:
+                    staff_member = Staff.objects.get(id=staff_id)
+                except Staff.DoesNotExist:
+                    # Log if a staff member wasn't found and skip them
+                    logger.warning(f"Staff with ID {staff_id} not found. Skipping.")
+                    continue
+
+                # The efficient way: find a log for this staff and date,
+                # then update it or create it.
+                AttendanceLog.objects.update_or_create(
+                    staff=staff_member,
+                    date=attendance_date,
+                    defaults={'status': attendance_status}
+                )
+
             return Response(
-                {'message': 'Attendance recorded successfully!'}, 
+                {'message': 'Attendance recorded successfully!'},
                 status=status.HTTP_200_OK
             )
 
         except Exception as e:
-            # Return a detailed error if something goes wrong
+            # Log the actual error to the server console for debugging
+            logger.error(f"An error occurred in punch_attendance: {e}", exc_info=True)
+            
+            # Return a generic error to the user
             return Response(
-                {'error': str(e)}, 
-                status=status.HTTP_400_BAD_REQUEST
+                {'error': 'An internal server error occurred.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
 @api_view(["PUT"])
 def edit_staff(request, staff_id):
     """
