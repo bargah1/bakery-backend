@@ -166,49 +166,24 @@ def add_staff(request):
 
 @api_view(["GET"])
 def list_staff(request):
-    today_str = date.today().strftime("%Y-%m-%d")
-    print(f"Fetching staff list for date: {today_str}") # Debug print
-
     query = db.collection('staff')
-    # ... (your location_id filter logic can remain here) ...
+    location_id = request.GET.get('location_id')
+    if location_id:
+        query = query.where(filter=FieldFilter('location_id', '==', location_id))
     
     staff_list = []
     try:
-        staff_docs = query.order_by('name').stream()
-        
-        for doc in staff_docs:
+        docs = query.order_by('name').stream() 
+        for doc in docs:
             staff_data = doc.to_dict()
-            staff_data['id'] = doc.id
+            staff_data['id'] = doc.id 
             if 'face_encodings' in staff_data:
-                del staff_data['face_encodings']
-            
-            try:
-                # --- Query for today's attendance log ---
-                attendance_query = db.collection('attendance') \
-                    .where(filter=FieldFilter('staff_id', '==', doc.id)) \
-                    .where(filter=FieldFilter('date', '==', today_str)) \
-                    .limit(1)
-                
-                attendance_docs = list(attendance_query.stream())
-                
-                if attendance_docs:
-                    staff_data['today_status'] = attendance_docs[0].to_dict().get('status', 'absent')
-                else:
-                    staff_data['today_status'] = 'absent'
-
-            except Exception as e:
-                # If the attendance query fails, log it and mark as absent
-                print(f"Error fetching attendance for staff {doc.id}: {e}")
-                staff_data['today_status'] = 'absent'
-
+                del staff_data['face_encodings'] 
             staff_list.append(staff_data)
-            
         return Response(staff_list, status=status.HTTP_200_OK)
     except Exception as e:
-        # This will catch the main error if the staff query fails
-        print(f"--- FATAL ERROR in list_staff ---: {e}")
         return Response({"error": f"Failed to list staff: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-# In your views.py file
+    
 
 @api_view(["DELETE"])
 def delete_staff(request, staff_id):
