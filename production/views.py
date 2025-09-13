@@ -116,9 +116,12 @@ def manage_recipes(request):
 @api_view(['PUT', 'DELETE'])
 def manage_single_recipe(request, recipe_id):
     recipe_ref = db.collection('recipes').document(recipe_id)
+    item_ref = db.collection('items').document(recipe_id)  # Reference to the item document
+
     if request.method == 'PUT':
         data = request.data
         
+        # Data for the 'recipes' collection
         recipe_data = {
             'name': data.get('name'),
             'unit_type': data.get('unit_type'),
@@ -126,23 +129,35 @@ def manage_single_recipe(request, recipe_id):
             'shelf_life_days': data.get('shelf_life_days'),
             'calories': data.get('calories'),
             'energy': data.get('energy'),
-            'nutrition_info': data.get('nutrition_info')
+            'nutrition_info': data.get('nutrition_info'),
+            # Also update the rate in the recipe document for consistency
+            'rate': data.get('rate') 
         }
+
+        # Data for the 'items' collection
         item_data = {
             'name': data.get('name'),
             'unit_type': data.get('unit_type'),
+            # This line correctly maps the frontend's 'rate' to the database's 'price'
+            'price': data.get('rate') 
         }
 
-        recipe_ref.update({k: v for k, v in recipe_data.items() if v is not None})
-        db.collection('items').document(recipe_id).update({k: v for k, v in item_data.items() if v is not None})
+        # Use dictionary comprehensions to filter out any None values before updating
+        recipe_updates = {k, v for k, v in recipe_data.items() if v is not None}
+        item_updates = {k, v for k, v in item_data.items() if v is not None}
+        
+        if recipe_updates:
+            recipe_ref.update(recipe_updates)
+        
+        if item_updates:
+            item_ref.update(item_updates)
         
         return Response({'message': 'Recipe updated.'})
         
     if request.method == 'DELETE':
         recipe_ref.delete()
-        db.collection('items').document(recipe_id).delete()
+        item_ref.delete()  # Ensure the corresponding item is also deleted
         return Response(status=204)
-
 # --- Production Recording ---
 @api_view(['POST'])
 def record_production(request):
