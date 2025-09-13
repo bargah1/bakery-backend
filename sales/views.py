@@ -398,3 +398,27 @@ def get_sales_history(request):
 
     except Exception as e:
         return Response({"error": f"Failed to get sales history: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(["GET"])
+def find_sale_by_bill_id(request, numeric_bill_id):
+    """
+    Finds a single sale record by its numeric_bill_id.
+    """
+    if not numeric_bill_id:
+        return Response({"error": "Bill number is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        # Query the 'sales' collection for a document with the matching bill ID
+        query = db.collection('sales').where(filter=FieldFilter('numeric_bill_id', '==', int(numeric_bill_id))).limit(1)
+        docs = list(query.stream())
+
+        if not docs:
+            return Response({"error": "Bill not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # If found, return the sales data
+        sale_data = docs[0].to_dict()
+        sale_data['id'] = docs[0].id
+        return Response(sale_data, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"error": f"An error occurred while finding the bill: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
