@@ -112,16 +112,14 @@ def manage_recipes(request):
         db.collection('items').document(recipe_id).set(item_data, merge=True)
         
         return Response({'id': recipe_id, 'message': 'Recipe added/updated.'}, status=201)
-
 @api_view(['PUT', 'DELETE'])
 def manage_single_recipe(request, recipe_id):
     recipe_ref = db.collection('recipes').document(recipe_id)
-    item_ref = db.collection('items').document(recipe_id)  # Reference to the item document
+    item_ref = db.collection('items').document(recipe_id)
 
     if request.method == 'PUT':
         data = request.data
         
-        # Data for the 'recipes' collection
         recipe_data = {
             'name': data.get('name'),
             'unit_type': data.get('unit_type'),
@@ -130,21 +128,18 @@ def manage_single_recipe(request, recipe_id):
             'calories': data.get('calories'),
             'energy': data.get('energy'),
             'nutrition_info': data.get('nutrition_info'),
-            # Also update the rate in the recipe document for consistency
             'rate': data.get('rate') 
         }
 
-        # Data for the 'items' collection
         item_data = {
             'name': data.get('name'),
             'unit_type': data.get('unit_type'),
-            # This line correctly maps the frontend's 'rate' to the database's 'price'
             'price': data.get('rate') 
         }
 
-        # Use dictionary comprehensions to filter out any None values before updating
-        recipe_updates = {k, v for k, v in recipe_data.items() if v is not None}
-        item_updates = {k, v for k, v in item_data.items() if v is not None}
+        # *** FIXED: Changed comma to colon in both lines ***
+        recipe_updates = {k: v for k, v in recipe_data.items() if v is not None}
+        item_updates = {k: v for k, v in item_data.items() if v is not None}
         
         if recipe_updates:
             recipe_ref.update(recipe_updates)
@@ -156,7 +151,7 @@ def manage_single_recipe(request, recipe_id):
         
     if request.method == 'DELETE':
         recipe_ref.delete()
-        item_ref.delete()  # Ensure the corresponding item is also deleted
+        item_ref.delete()
         return Response(status=204)
 # --- Production Recording ---
 @api_view(['POST'])
