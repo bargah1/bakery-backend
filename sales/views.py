@@ -371,3 +371,30 @@ def delete_sales_data(request):
     except Exception as e:
         print(f"ERROR deleting sales data: {e}")
         return Response({'error': f'An unexpected error occurred during deletion: {e}'}, status=500)
+
+@api_view(["GET"])
+def get_sales_history(request):
+    """
+    Fetches a list of sales records within a given date range.
+    """
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+
+    try:
+        query = db.collection('sales').order_by('timestamp', direction='DESCENDING')
+
+        if start_date:
+            query = query.where(filter=FieldFilter('date', '>=', start_date))
+        if end_date:
+            query = query.where(filter=FieldFilter('date', '<=', end_date))
+
+        sales_list = []
+        for doc in query.stream():
+            sale_data = doc.to_dict()
+            sale_data['id'] = doc.id
+            sales_list.append(sale_data)
+            
+        return Response(sales_list, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"error": f"Failed to get sales history: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
