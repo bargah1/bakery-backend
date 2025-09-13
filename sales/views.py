@@ -381,12 +381,17 @@ def get_sales_history(request):
     end_date = request.GET.get('end_date')
 
     try:
-        query = db.collection('sales').order_by('timestamp', direction='DESCENDING')
+        # Start with the base collection
+        query = db.collection('sales')
 
+        # Apply the date range filters
         if start_date:
             query = query.where(filter=FieldFilter('date', '>=', start_date))
         if end_date:
             query = query.where(filter=FieldFilter('date', '<=', end_date))
+
+        # ✅ CORRECTED QUERY: Order by 'date' first, then by 'timestamp'
+        query = query.order_by('date', direction='DESCENDING').order_by('timestamp', direction='DESCENDING')
 
         sales_list = []
         for doc in query.stream():
@@ -397,6 +402,7 @@ def get_sales_history(request):
         return Response(sales_list, status=status.HTTP_200_OK)
 
     except Exception as e:
+        # This will now give a new, more useful error if an index is needed
         return Response({"error": f"Failed to get sales history: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(["GET"])
