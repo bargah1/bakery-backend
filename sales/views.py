@@ -33,11 +33,9 @@ def process_sale(request):
         processed_items = []
         total_cogs = 0.0
 
-        # --- FIX: Calculate cost for each item as it's sold ---
         for item in items:
             product_id = item.get('product_id')
             if not product_id or 'custom_' in product_id:
-                # For custom items, cost is 0 unless otherwise specified
                 item['cost'] = 0.0
                 processed_items.append(item)
                 continue
@@ -50,11 +48,8 @@ def process_sale(request):
                 item_cost = 0.0
                 
                 if product_data.get('type') == 'wholesale':
-                    # Cost is the stored purchase price
                     item_cost = float(product_data.get('cost_price', 0.0)) * item.get('quantity', 0)
                 else:
-                    # For production items, the cost will be calculated later from production logs
-                    # For now, we can mark its cost contribution in this sale as 0
                     item_cost = 0.0
 
                 item['cost'] = item_cost
@@ -62,7 +57,6 @@ def process_sale(request):
 
             processed_items.append(item)
             
-            # Decrement stock for items sold by piece
             if product_data.get('unit_type') == 'piece':
                 quantity_sold = item.get('quantity', 0)
                 if quantity_sold > 0:
@@ -75,9 +69,12 @@ def process_sale(request):
             'date': datetime.now(timezone.utc).date().isoformat(),
             'numeric_bill_id': numeric_bill_id,
             'total_amount': total_amount,
-            'total_cogs': total_cogs, # Store the calculated COGS for this specific sale
-            'items': processed_items, # Store items with their calculated cost
-            'outlet_id': sale_data.get('outlet_id', 'main_branch'),
+            'total_cogs': total_cogs,
+            'items': processed_items,
+            'outlet_id': sale_data.get('outlet_id'),
+
+            # --- FIX: Add the staff_id to the data being saved ---
+            'staff_id': sale_data.get('staff_id')
         })
         
         batch.commit()
@@ -87,7 +84,6 @@ def process_sale(request):
     except Exception as e:
         print(f"ERROR processing sale: {e}")
         return Response({'error': f'An unexpected error occurred: {e}'}, status=500)
-
 
 @api_view(["POST"])
 def record_sale(request):
