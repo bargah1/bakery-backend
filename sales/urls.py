@@ -19,5 +19,6 @@ urlpatterns = [
     # The most generic path that captures any string MUST be last.
     path('<str:sale_id>/', views.get_sale_details, name='get_sale_details'),
     path('sales/history/', views.get_sales_history, name='get_sales_history'),
+    path('sales/find/<str:numeric_bill_id>/', views.find_sale_by_bill_id, name='find_sale_by_bill_id'),
     
 ]
