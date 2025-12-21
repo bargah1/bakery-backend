@@ -1,6 +1,7 @@
     # items/urls.py
 from django.urls import path
 from . import views
+from .pos_views import pos_products
 urlpatterns = [
 
     path('manage-products/', views.manage_products, name='manage_products'),
