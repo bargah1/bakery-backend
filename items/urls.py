@@ -8,5 +8,7 @@ urlpatterns = [
     path('inventory-report/', views.get_inventory_report, name='inventory_report'),
     path('generate-barcode/', views.generate_barcode, name='generate_barcode'),
     path('upload-image/', views.upload_product_image, name='upload_product_image'), 
+    path('pos/products/', pos_products)
+
 
 ]
