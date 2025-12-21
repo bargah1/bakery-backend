@@ -13,39 +13,69 @@ outlets_collection_ref = db.collection('outlets')
 def manage_outlets(request):
     """
     Handles listing all outlets (GET) and creating a new outlet (POST).
+    SAFE for low-memory servers (Render Starter).
     """
+
     if request.method == 'GET':
         try:
-            docs = outlets_collection_ref.order_by('name').stream()
-            outlets_list = [{'id': doc.id, **doc.to_dict()} for doc in docs]
+            # 🔥 IMPORTANT: NO stream(), use get() + limit()
+            docs = (
+                outlets_collection_ref
+                .order_by('name')
+                .limit(10)
+                .get()
+            )
+
+            outlets_list = []
+            for doc in docs:
+                data = doc.to_dict() or {}
+                outlets_list.append({
+                    "id": doc.id,
+                    "name": data.get("name", ""),
+                    "phone": data.get("phone", ""),
+                    "type": data.get("type", "sales"),
+                })
+
             return Response(outlets_list, status=status.HTTP_200_OK)
+
         except Exception as e:
-            return Response({"error": f"Failed to fetch outlets: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"error": f"Failed to fetch outlets: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     elif request.method == 'POST':
         try:
             name = request.data.get("name")
             phone = request.data.get("phone")
-            # --- FIX: Get the new 'type' field from the request ---
-            outlet_type = request.data.get("type", "sales") # Default to 'sales'
+            outlet_type = request.data.get("type", "sales")
 
             if not name or not phone:
-                return Response({"error": "Name and phone are required."}, status=status.HTTP_400_BAD_REQUEST)
-            
-            outlet_id = name.lower().replace(" ", "_").replace("-", "_")
-            
-            # --- FIX: Add the 'type' to the data saved in Firestore ---
-            new_outlet_data = {
-                "name": name, 
-                "phone": phone,
-                "type": outlet_type 
-            }
-            outlets_collection_ref.document(outlet_id).set(new_outlet_data)
-            
-            return Response({"message": "Outlet added", "id": outlet_id}, status=status.HTTP_201_CREATED)
-        except Exception as e:
-            return Response({"error": f"Failed to add outlet: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response(
+                    {"error": "Name and phone are required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
+            outlet_id = name.lower().replace(" ", "_").replace("-", "_")
+
+            new_outlet_data = {
+                "name": name,
+                "phone": phone,
+                "type": outlet_type,
+            }
+
+            outlets_collection_ref.document(outlet_id).set(new_outlet_data)
+
+            return Response(
+                {"message": "Outlet added", "id": outlet_id},
+                status=status.HTTP_201_CREATED
+            )
+
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to add outlet: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 @api_view(['PUT', 'DELETE'])
 def manage_single_outlet(request, outlet_id):
     """
