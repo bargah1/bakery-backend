@@ -26,3 +26,8 @@ db.sqlite3
 # Firebase Credentials (IMPORTANT)
 serviceAccountKey.json
 client_secrets.json
+manger-ai-firebase-adminsdk-fbsvc-dd153f7c46.json
+*.json
+
+# Node
+node_modules/

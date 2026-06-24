@@ -1,10 +1,10 @@
-# items/pos_views.py
+# items/pos_views.py (Migrated to Supabase)
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from bakery_ai_manager.firestore_client import get_firestore_client
+from bakery_ai_manager.supabase_client import get_supabase_client
 
-db = get_firestore_client()
+db = get_supabase_client()
 
 @api_view(['GET'])
 def pos_products(request):
@@ -14,39 +14,36 @@ def pos_products(request):
     - outlet aware
     - fast
     """
-
     outlet_id = request.GET.get('outlet_id')
     limit = int(request.GET.get('limit', 50))
-    cursor = request.GET.get('cursor')  # document id
+    cursor = request.GET.get('cursor')  # product id for pagination
 
     if not outlet_id:
         return Response({"error": "outlet_id required"}, status=400)
 
-    query = (
-        db.collection('items')
-        .where('is_active', '==', True)
-        .where('outlet_ids', 'array_contains', outlet_id)
-        .order_by('name')
-        .limit(limit)
-    )
+    try:
+        query = db.table('items').select('*') \
+            .eq('is_active', True) \
+            .contains('outlet_ids', [outlet_id]) \
+            .order('name') \
+            .limit(limit)
 
-    if cursor:
-        last_doc = db.collection('items').document(cursor).get()
-        if last_doc.exists:
-            query = query.start_after(last_doc)
+        # For cursor-based pagination, filter items after the cursor
+        if cursor:
+            # Get the cursor item's name for ordering
+            cursor_result = db.table('items').select('name').eq('id', cursor).execute()
+            if cursor_result.data:
+                cursor_name = cursor_result.data[0]['name']
+                query = query.gt('name', cursor_name)
 
-    docs = query.stream()
+        result = query.execute()
 
-    products = []
-    last_id = None
+        products = result.data
+        last_id = products[-1]['id'] if products else None
 
-    for doc in docs:
-        data = doc.to_dict()
-        data['id'] = doc.id
-        products.append(data)
-        last_id = doc.id
-
-    return Response({
-        "results": products,
-        "next_cursor": last_id
-    })
+        return Response({
+            "results": products,
+            "next_cursor": last_id
+        })
+    except Exception as e:
+        return Response({"error": f"Failed to fetch POS products: {e}"}, status=500)

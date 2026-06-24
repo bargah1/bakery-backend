@@ -1,25 +1,25 @@
 # =======================================================
-# File: production/views.py (Final Corrected Version)
+# File: production/views.py (Migrated to Supabase)
 # =======================================================
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from datetime import datetime, timezone
 import time
-from firebase_admin import firestore
-from bakery_ai_manager.firestore_client import get_firestore_client
-from google.cloud.firestore_v1.base_query import FieldFilter
-from google.api_core import exceptions
+from bakery_ai_manager.supabase_client import get_supabase_client
 
-db = get_firestore_client()
+db = get_supabase_client()
+
 
 # --- Ingredient Management Views ---
 @api_view(['GET', 'POST'])
 def manage_ingredients_by_outlet(request, outlet_id):
-    ingredients_ref = db.collection('outlets').document(outlet_id).collection('ingredients')
     if request.method == 'GET':
-        docs = ingredients_ref.order_by('name').stream()
-        return Response([{'id': doc.id, **doc.to_dict()} for doc in docs])
+        try:
+            result = db.table('outlet_ingredients').select('*').eq('outlet_id', outlet_id).order('name').execute()
+            return Response(result.data)
+        except Exception as e:
+            return Response({'error': f'Failed to fetch ingredients: {e}'}, status=500)
     
     if request.method == 'POST':
         data = request.data
@@ -30,59 +30,84 @@ def manage_ingredients_by_outlet(request, outlet_id):
             return Response({'error': 'Ingredient name and unit are required.'}, status=400)
         
         ingredient_id = name.lower().replace(' ', '_')
-        ingredients_ref.document(ingredient_id).set({
-            'name': name, 'unit': unit, 'stock': stock, 'cost_per_unit': cost_per_unit
-        })
+        ingredient_data = {
+            'id': ingredient_id,
+            'outlet_id': outlet_id,
+            'name': name,
+            'unit': unit,
+            'stock': stock,
+            'cost_per_unit': cost_per_unit
+        }
+        db.table('outlet_ingredients').upsert(ingredient_data).execute()
         return Response({'id': ingredient_id, 'message': 'Ingredient added.'}, status=201)
+
 
 @api_view(['PUT', 'DELETE'])
 def manage_single_ingredient_by_outlet(request, outlet_id, ingredient_id):
-    ingredient_ref = db.collection('outlets').document(outlet_id).collection('ingredients').document(ingredient_id)
     if request.method == 'PUT':
-        ingredient_ref.update(request.data)
-        return Response({'message': 'Ingredient updated.'})
+        try:
+            update_data = dict(request.data)
+            update_data.pop('id', None)
+            update_data.pop('outlet_id', None)
+            db.table('outlet_ingredients').update(update_data).eq('id', ingredient_id).eq('outlet_id', outlet_id).execute()
+            return Response({'message': 'Ingredient updated.'})
+        except Exception as e:
+            return Response({'error': f'Failed to update ingredient: {e}'}, status=500)
+    
     if request.method == 'DELETE':
-        ingredient_ref.delete()
-        return Response(status=204)
+        try:
+            db.table('outlet_ingredients').delete().eq('id', ingredient_id).eq('outlet_id', outlet_id).execute()
+            return Response(status=204)
+        except Exception as e:
+            return Response({'error': f'Failed to delete ingredient: {e}'}, status=500)
 
-# *** FIX: Corrected logic to properly sum stock from all units ***
+
 @api_view(['GET'])
 def get_all_ingredients(request):
+    """Sum stock from all production units for each ingredient."""
     all_ingredients = {}
     try:
-        outlets_ref = db.collection('outlets')
-        # We only care about production units for total ingredient stock
-        query = outlets_ref.where(filter=FieldFilter('type', '==', 'production'))
-        production_units = list(query.stream())
+        # Get all production outlets
+        outlets_result = db.table('outlets').select('id').eq('type', 'production').execute()
+        production_unit_ids = [o['id'] for o in outlets_result.data]
         
-        for unit in production_units:
-            ingredients_ref = unit.reference.collection('ingredients')
-            for doc in ingredients_ref.stream():
-                doc_data = doc.to_dict()
-                ingredient_id = doc.id
-                
-                # If we've seen this ingredient before, add to its stock
-                if ingredient_id in all_ingredients:
-                    all_ingredients[ingredient_id]['stock'] += doc_data.get('stock', 0)
-                # Otherwise, add it to our dictionary for the first time
-                else:
-                    all_ingredients[ingredient_id] = doc_data
+        if not production_unit_ids:
+            return Response([])
         
-        # Convert the dictionary to a list for the final response
-        ingredient_list = [{'id': key, **value} for key, value in all_ingredients.items()]
+        # Get all ingredients for production units
+        ingredients_result = db.table('outlet_ingredients').select('*').in_('outlet_id', production_unit_ids).execute()
+        
+        for doc_data in ingredients_result.data:
+            ingredient_id = doc_data['id']
+            
+            if ingredient_id in all_ingredients:
+                all_ingredients[ingredient_id]['stock'] += doc_data.get('stock', 0)
+            else:
+                all_ingredients[ingredient_id] = {
+                    'id': ingredient_id,
+                    'name': doc_data.get('name'),
+                    'unit': doc_data.get('unit'),
+                    'stock': doc_data.get('stock', 0),
+                    'cost_per_unit': doc_data.get('cost_per_unit', 0)
+                }
+        
+        ingredient_list = list(all_ingredients.values())
         return Response(ingredient_list)
     except Exception as e:
         print(f"ERROR fetching all ingredients: {e}")
         return Response({"error": "Could not fetch master ingredient list."}, status=500)
 
+
 # --- Recipe (Product) Management ---
 @api_view(['GET', 'POST'])
 def manage_recipes(request):
-    recipes_ref = db.collection('recipes')
     if request.method == 'GET':
-        docs = recipes_ref.order_by('name').stream()
-        recipes = [{'id': doc.id, **doc.to_dict()} for doc in docs]
-        return Response(recipes)
+        try:
+            result = db.table('recipes').select('*').order('name').execute()
+            return Response(result.data)
+        except Exception as e:
+            return Response({'error': f'Failed to fetch recipes: {e}'}, status=500)
+
     if request.method == 'POST':
         data = request.data
         name = data.get('name')
@@ -92,6 +117,7 @@ def manage_recipes(request):
         recipe_id = name.lower().replace(' ', '_')
         
         recipe_data = {
+            'id': recipe_id,
             'name': name,
             'unit_type': data.get('unit_type'),
             'ingredients': data.get('ingredients', []),
@@ -102,21 +128,21 @@ def manage_recipes(request):
         }
         
         item_data = {
+            'id': recipe_id,
             'name': name,
             'unit_type': data.get('unit_type'),
             'price': data.get('price', 0),
             'stock': data.get('stock', 0)
         }
         
-        recipes_ref.document(recipe_id).set(recipe_data)
-        db.collection('items').document(recipe_id).set(item_data, merge=True)
+        db.table('recipes').upsert(recipe_data).execute()
+        db.table('items').upsert(item_data).execute()
         
         return Response({'id': recipe_id, 'message': 'Recipe added/updated.'}, status=201)
+
+
 @api_view(['PUT', 'DELETE'])
 def manage_single_recipe(request, recipe_id):
-    recipe_ref = db.collection('recipes').document(recipe_id)
-    item_ref = db.collection('items').document(recipe_id)
-
     if request.method == 'PUT':
         data = request.data
         
@@ -128,36 +154,46 @@ def manage_single_recipe(request, recipe_id):
             'calories': data.get('calories'),
             'energy': data.get('energy'),
             'nutrition_info': data.get('nutrition_info'),
-            'rate': data.get('rate') 
+            'rate': data.get('rate')
         }
 
         item_data = {
             'name': data.get('name'),
             'unit_type': data.get('unit_type'),
-            'price': data.get('rate') 
+            'price': data.get('rate')
         }
 
-        # *** FIXED: Changed comma to colon in both lines ***
         recipe_updates = {k: v for k, v in recipe_data.items() if v is not None}
         item_updates = {k: v for k, v in item_data.items() if v is not None}
         
-        if recipe_updates:
-            recipe_ref.update(recipe_updates)
-        
-        if item_updates:
-            item_ref.update(item_updates)
-        
-        return Response({'message': 'Recipe updated.'})
+        try:
+            if recipe_updates:
+                db.table('recipes').update(recipe_updates).eq('id', recipe_id).execute()
+            if item_updates:
+                db.table('items').update(item_updates).eq('id', recipe_id).execute()
+            return Response({'message': 'Recipe updated.'})
+        except Exception as e:
+            return Response({'error': f'Failed to update recipe: {e}'}, status=500)
         
     if request.method == 'DELETE':
-        recipe_ref.delete()
-        item_ref.delete()
-        return Response(status=204)
+        try:
+            db.table('recipes').delete().eq('id', recipe_id).execute()
+            db.table('items').delete().eq('id', recipe_id).execute()
+            return Response(status=204)
+        except Exception as e:
+            return Response({'error': f'Failed to delete recipe: {e}'}, status=500)
+
+
 # --- Production Recording ---
 @api_view(['POST'])
 def record_production(request):
+    """
+    Records production using a PostgreSQL transaction function (RPC).
+    """
     data = request.data
-    recipe_id, unit_id, quantity = data.get('recipe_id'), data.get('production_unit_id'), float(data.get('quantity', 0))
+    recipe_id = data.get('recipe_id')
+    unit_id = data.get('production_unit_id')
+    quantity = float(data.get('quantity', 0))
 
     if not all([recipe_id, unit_id, quantity > 0]):
         return Response({'error': 'Recipe, Production Unit, and a positive quantity are required.'}, status=400)
@@ -166,56 +202,33 @@ def record_production(request):
         timestamp_str = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
         batch_id = f"{recipe_id.upper()}-{timestamp_str}"
 
-        @firestore.transactional
-        def update_stock_in_transaction(transaction):
-            recipe_ref = db.collection('recipes').document(recipe_id)
-            recipe_doc_snapshot = recipe_ref.get(transaction=transaction)
-            if not recipe_doc_snapshot.exists: raise Exception(f"Recipe '{recipe_id}' not found.")
-            recipe_doc = recipe_doc_snapshot.to_dict()
-            
-            total_batch_cost = 0.0
-            
-            for req_ingredient in recipe_doc.get('ingredients', []):
-                ing_id, ing_qty_needed = req_ingredient['id'], float(req_ingredient['quantity'])
-                
-                ing_ref = db.collection('outlets').document(unit_id).collection('ingredients').document(ing_id)
-                ing_doc_snapshot = ing_ref.get(transaction=transaction)
-                if not ing_doc_snapshot.exists: raise Exception(f"Ingredient '{ing_id}' not found in this unit.")
-                ing_doc = ing_doc_snapshot.to_dict()
-
-                ing_cost_per_unit = float(ing_doc.get('cost_per_unit', 0))
-                total_needed = ing_qty_needed * quantity
-                
-                if total_needed > ing_doc.get('stock', 0):
-                    raise Exception(f"Not enough stock for {ing_doc.get('name')}. Required: {total_needed}, Available: {ing_doc.get('stock', 0)}")
-
-                total_batch_cost += total_needed * ing_cost_per_unit
-                
-                transaction.update(ing_ref, {'stock': firestore.Increment(-total_needed)})
-
-            product_ref = db.collection('items').document(recipe_id)
-            transaction.update(product_ref, {'stock': firestore.Increment(quantity)})
-            
-            log_ref = db.collection('production_logs').document(batch_id)
-            transaction.set(log_ref, {
-                'batch_id': batch_id,
-                'recipe_id': recipe_id, 'quantity_produced': quantity,
-                'production_unit_id': unit_id, 'total_cost': total_batch_cost,
-                'timestamp': datetime.now(timezone.utc), 'date': datetime.now(timezone.utc).date().isoformat()
-            })
-            return batch_id
-
-        final_batch_id = update_stock_in_transaction(db.transaction())
+        # Get recipe ingredients
+        recipe_result = db.table('recipes').select('ingredients').eq('id', recipe_id).execute()
+        if not recipe_result.data:
+            return Response({'error': f"Recipe '{recipe_id}' not found."}, status=404)
         
+        ingredients = recipe_result.data[0].get('ingredients', [])
+
+        # Call the PostgreSQL transaction function
+        result = db.rpc('record_production_transaction', {
+            'p_batch_id': batch_id,
+            'p_recipe_id': recipe_id,
+            'p_quantity': quantity,
+            'p_production_unit_id': unit_id,
+            'p_ingredients': ingredients,
+            'p_date': datetime.now(timezone.utc).date().isoformat(),
+            'p_timestamp': datetime.now(timezone.utc).isoformat()
+        }).execute()
+
         return Response({
             'message': 'Production recorded and stock/cost updated.',
-            'batch_id': final_batch_id 
+            'batch_id': batch_id
         }, status=200)
 
     except Exception as e:
         return Response({'error': f'An error occurred: {e}'}, status=500)
     
-    
+
 # --- Reporting Views ---
 @api_view(["GET"])
 def get_structured_production_report(request):
@@ -224,23 +237,20 @@ def get_structured_production_report(request):
         end_date_str = request.GET.get('end_date')
         production_unit_id = request.GET.get('production_unit_id')
         
-        query = db.collection('production_logs')
+        query = db.table('production_logs').select('*')
 
-        if start_date_str: query = query.where(filter=FieldFilter('date', '>=', start_date_str))
-        if end_date_str: query = query.where(filter=FieldFilter('date', '<=', end_date_str))
+        if start_date_str:
+            query = query.gte('date', start_date_str)
+        if end_date_str:
+            query = query.lte('date', end_date_str)
         if production_unit_id and production_unit_id != 'All Production Units':
-            query = query.where(filter=FieldFilter('production_unit_id', '==', production_unit_id))
+            query = query.eq('production_unit_id', production_unit_id)
         
-        query = query.order_by('date', direction=firestore.Query.DESCENDING).order_by('timestamp', direction=firestore.Query.DESCENDING)
+        query = query.order('date', desc=True).order('timestamp', desc=True)
 
-        docs = query.stream()
-        data = [{'id': doc.id, **doc.to_dict()} for doc in docs]
-        return Response(data, status=status.HTTP_200_OK)
+        result = query.execute()
+        return Response(result.data, status=status.HTTP_200_OK)
 
-    except exceptions.FailedPrecondition as e:
-        error_message = f"Database Index Missing: Your query requires a custom index in Firestore. Please check your Django server console log. It should contain a URL to create the required index automatically. Error details: {e}"
-        print(f"ERROR: {error_message}")
-        return Response({"error": error_message}, status=500)
     except Exception as e:
         print(f"ERROR: Failed to retrieve structured production data: {e}")
         return Response({"error": "An unknown error occurred while fetching production data.", "details": str(e)}, status=500)
@@ -255,18 +265,15 @@ def delete_production_logs(request):
     if not start_date or not end_date:
         return Response({'error': 'Start and end dates are required.'}, status=400)
     try:
-        query = db.collection('production_logs').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
+        query = db.table('production_logs').delete().gte('date', start_date).lte('date', end_date)
         if production_unit_id and production_unit_id != 'All Production Units':
-            query = query.where(filter=FieldFilter('production_unit_id', '==', production_unit_id))
+            query = query.eq('production_unit_id', production_unit_id)
         
-        docs_to_delete = list(query.stream())
-        if not docs_to_delete:
+        result = query.execute()
+        deleted_count = len(result.data) if result.data else 0
+        
+        if deleted_count == 0:
             return Response({'message': 'No logs found to delete.'}, status=200)
-        
-        batch = db.batch()
-        for doc in docs_to_delete:
-            batch.delete(doc.reference)
-        batch.commit()
-        return Response({'message': f'Deleted {len(docs_to_delete)} production logs.'}, status=200)
+        return Response({'message': f'Deleted {deleted_count} production logs.'}, status=200)
     except Exception as e:
         return Response({'error': f'Failed to delete logs: {e}'}, status=500)
