@@ -12,3 +12,4 @@ Pillow
 python-dotenv
 Flask==3.1.1
 replicate
+groq

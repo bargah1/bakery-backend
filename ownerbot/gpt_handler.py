@@ -1,109 +1,213 @@
 # ===================================================================
-# File: app.py (Updated version using the Replicate API for STT)
-# NOTE: This code is lightweight and can run on low-RAM servers.
+# File: ownerbot/gpt_handler.py
+# Rewritten to use Groq AI + Supabase (replaces Gemini + Firestore)
 # ===================================================================
 import os
 import datetime
 import json
 import base64
-from flask import Flask, request, jsonify
-from google.cloud import firestore
-from google.cloud.firestore_v1.base_query import FieldFilter
-from google.cloud import translate_v2 as translate, texttospeech
-import google.generativeai as genai
-import google.auth
-import numpy as np
-import requests
-#import cv2 # Not directly used in the provided snippets, but kept as it was in your original
 
-# --- For Speech-to-Text (using Replicate API) ---
-import replicate # <-- ADD THIS
-import tempfile  # For creating temporary files
-import shutil    # For cleaning up temporary directories
-
-# --- CONFIGURATION ---
 from dotenv import load_dotenv
 load_dotenv()
 
-# Set your Google Cloud Project ID and API Key in a .env file:
-# GOOGLE_API_KEY="YOUR_GEMINI_API_KEY"
-# GOOGLE_CLOUD_PROJECT="your-gcp-project-id"
-# REPLICATE_API_TOKEN="your_replicate_api_key" # <-- ADD THIS
+from groq import Groq
+from bakery_ai_manager.supabase_client import get_supabase_client
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
-# The Replicate client will automatically use the REPLICATE_API_TOKEN environment variable
+# --- Optional: Google Cloud for TTS & Translation ---
+try:
+    from google.cloud import translate_v2 as translate, texttospeech
+    import google.auth
+    translate_client = None
+    tts_client = None
 
-app = Flask(__name__)
+    def _init_google_clients():
+        global translate_client, tts_client
+        try:
+            credentials, project = google.auth.default()
+            translate_client = translate.Client(credentials=credentials)
+            tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
+            print("✅ Google Cloud TTS & Translation initialized.")
+        except Exception as e:
+            print(f"⚠️  Google Cloud TTS/Translation not available: {e}")
+            print("   (Ownerbot will still work, but without voice/translation features)")
+
+    _init_google_clients()
+    GOOGLE_CLOUD_AVAILABLE = translate_client is not None
+except ImportError:
+    print("⚠️  Google Cloud libraries not installed. TTS/Translation disabled.")
+    translate_client = None
+    tts_client = None
+    GOOGLE_CLOUD_AVAILABLE = False
+
+
+# --- CONFIGURATION ---
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # --- INITIALIZE CLIENTS ---
-# Initialize Google Cloud clients and Gemini model globally once
+groq_client = None
 db = None
-model = None
-translate_client = None
-tts_client = None
-# whisper_model is no longer needed
 
 def initialize_clients():
-    global db, model, translate_client, tts_client
+    global groq_client, db
     try:
-        if not google.auth.default()[0]:
-            print("WARNING: Google Cloud credentials not found. Some services may fail.")
-            print("Please ensure GOOGLE_APPLICATION_CREDENTIALS is set or gcloud auth is configured.")
-
-        credentials, project = google.auth.default()
-        db = firestore.Client(project=PROJECT_ID, credentials=credentials)
-        translate_client = translate.Client(credentials=credentials)
-        tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
-        genai.configure(api_key=GOOGLE_API_KEY)
-        model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
-        
-        # <-- REMOVED THE ENTIRE LOCAL WHISPER MODEL LOADING SECTION -->
-        # This makes the app start faster and use very little memory.
-        
-        print("DEBUG: All services initialized successfully.")
+        if not GROQ_API_KEY:
+            raise ValueError("GROQ_API_KEY environment variable is not set.")
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        db = get_supabase_client()
+        print("✅ Groq + Supabase clients initialized successfully.")
     except Exception as e:
-        print(f"FATAL ERROR: Could not initialize services. Error: {e}")
-        db, model, translate_client, tts_client = None, None, None, None
+        print(f"🔥 FATAL ERROR: Could not initialize clients: {e}")
+        groq_client, db = None, None
 
-# Call initialization once when the app starts
-with app.app_context():
-    initialize_clients()
+initialize_clients()
 
 
-# --- Helper Function to find staff ID from name ---
+# --- TOOL DEFINITIONS (OpenAI-compatible format for Groq) ---
+TOOL_DEFINITIONS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_sales_report",
+            "description": "Fetches a sales report for a given date range and optional outlet. Use this when the user asks about sales, revenue, or transactions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD format"
+                    },
+                    "outlet_id": {
+                        "type": "string",
+                        "description": "Optional outlet ID to filter by. Leave empty for all outlets."
+                    }
+                },
+                "required": ["start_date", "end_date"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_profit_report",
+            "description": "Calculates profit and loss including revenue, cost of goods sold, and expenses. Use when the user asks about profit, loss, earnings, or P&L.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD format"
+                    }
+                },
+                "required": ["start_date", "end_date"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_production_report",
+            "description": "Fetches production data showing what was produced and in what quantities.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format. Defaults to today."
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD format. Defaults to today."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_inventory_report",
+            "description": "Fetches current inventory/stock levels for all products.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_staff_activity_report",
+            "description": "Fetches staff attendance and activity data. Can filter by staff name and date range.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "staff_name": {
+                        "type": "string",
+                        "description": "Optional staff member name to filter by"
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format. Defaults to today."
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD format. Defaults to today."
+                    }
+                },
+                "required": []
+            }
+        }
+    }
+]
+
+
+# --- DATA FETCHING FUNCTIONS (Supabase) ---
+
 def _get_staff_id_from_name(staff_name: str) -> str:
-    if not db or not staff_name: return None
-    query = db.collection('staff').where(filter=FieldFilter("name", "==", staff_name)).limit(1)
-    docs = list(query.stream())
-    if docs:
-        staff_id = docs[0].id
-        print(f"DEBUG: Matched staff name '{staff_name}' to ID '{staff_id}'")
-        return staff_id
-    
-    print(f"WARN: Could not find a staff ID for the name '{staff_name}'.")
+    """Finds a staff ID by matching the name in Supabase."""
+    if not db or not staff_name:
+        return None
+    try:
+        result = db.table('staff').select('id').ilike('name', f'%{staff_name}%').limit(1).execute()
+        if result.data:
+            staff_id = result.data[0]['id']
+            print(f"DEBUG: Matched staff name '{staff_name}' to ID '{staff_id}'")
+            return staff_id
+    except Exception as e:
+        print(f"WARN: Error looking up staff name '{staff_name}': {e}")
     return None
 
-# --- DATA FETCHING TOOLS (Firestore Functions) ---
-def get_sales_report(start_date: str, end_date: str, outlet_id: str = None):
-    """Fetches a sales report for a given date range and optional outlet."""
-    global db # Ensure db is accessible
-    if not db: return "Error: Database is not connected."
+
+def get_sales_report(start_date: str, end_date: str, outlet_id: str = None) -> str:
+    """Fetches a sales report from Supabase for a given date range and optional outlet."""
+    if not db:
+        return "Error: Database is not connected."
     try:
-        query = db.collection('sales')
-        query = query.where(filter=FieldFilter('date', '>=', start_date))
-        query = query.where(filter=FieldFilter('date', '<=', end_date))
+        query = db.table('sales').select('*').gte('date', start_date).lte('date', end_date)
         if outlet_id and outlet_id != 'All Outlets':
-            query = query.where(filter=FieldFilter('outlet_id', '==', outlet_id))
-        
-        docs = list(query.stream())
+            query = query.eq('outlet_id', outlet_id)
+
+        result = query.execute()
+        docs = result.data
+
         if not docs:
             return f"No sales data found for outlet '{outlet_id or 'all outlets'}' from {start_date} to {end_date}."
 
-        total_sales = sum(doc.to_dict().get('total_amount', 0.0) for doc in docs)
+        total_sales = sum(doc.get('total_amount', 0.0) for doc in docs)
         items_sold = {}
         for doc in docs:
-            for item in doc.to_dict().get('items', []):
+            for item in doc.get('items', []):
                 if isinstance(item, dict) and item.get('product_id'):
                     item_name = item.get('product_id').replace('_', ' ').title()
                     if item.get('quantity', 0) > 0:
@@ -130,186 +234,25 @@ def get_sales_report(start_date: str, end_date: str, outlet_id: str = None):
     except Exception as e:
         return f"An error occurred while fetching the sales report: {e}"
 
-def get_production_report(start_date: str = None, end_date: str = None):
-    global db
-    if not db: return "Error: Firestore is not connected."
-    query = db.collection('production')
-    today = datetime.date.today().isoformat()
-    if start_date: query = query.where(filter=FieldFilter('date', '>=', start_date))
-    if end_date: query = query.where(filter=FieldFilter('date', '<=', end_date))
-    if not start_date and not end_date: query = query.where(filter=FieldFilter('date', '==', today))
-    results = list(query.stream())
-    if not results: return "No production data found."
-    produced = {}
-    for doc in results:
-        data = doc.to_dict()
-        produced[data.get('product_id')] = produced.get(data.get('product_id'), 0) + data.get('quantity_produced', 0)
-    report = "Production Report:\n" + "\n".join([f"  - {p.replace('_', ' ').title()}: {q} units" for p, q in sorted(produced.items())])
-    return report
 
-def get_inventory_report():
-    global db
-    if not db: return "Error: Firestore is not connected."
-    product_list = list(db.collection('items').order_by('name').stream())
-    if not product_list: return "No inventory items found."
-    report_lines = ["Current Inventory Report:\n"] + [f"- {doc.to_dict().get('name', 'Unknown')}: {doc.to_dict().get('stock', 0)} units" for doc in product_list]
-    return "\n".join(report_lines)
-
-def get_staff_activity_report(staff_name: str = None, start_date: str = None, end_date: str = None):
-    global db
-    if not db: return "Error: Firestore is not connected."
-    today, all_events = datetime.date.today(), []
-    start_date = start_date or today.isoformat()
-    end_date = end_date or today.isoformat()
-    staff_id_to_filter = _get_staff_id_from_name(staff_name) if staff_name else None
-    if staff_name and not staff_id_to_filter: return f"I could not find any staff member named '{staff_name}'."
-
-    att_q = db.collection('attendance_records').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
-    if staff_id_to_filter: att_q = att_q.where(filter=FieldFilter('staff_id', '==', staff_id_to_filter))
-    for doc in att_q.stream():
-        d = doc.to_dict()
-        all_events.append({"ts": d.get('timestamp'), "name": d.get('staff_name'), "event": f"Manually {d.get('punch_type', 'punched').replace('_', ' ')} at {d.get('location_id', 'N/A')}."})
-
-    cctv_q = db.collection('cctv_observations').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
-    if staff_name: cctv_q = cctv_q.where(filter=FieldFilter('staff_name', '==', staff_name))
-    for doc in cctv_q.stream():
-        d = doc.to_dict()
-        all_events.append({"ts": d.get('timestamp'), "name": d.get('staff_name'), "event": f"Spotted by CCTV on {d.get('camera_id', 'N/A')}."})
-
-    if not all_events: return f"No activities found for '{staff_name or 'any staff'}'."
-    all_events.sort(key=lambda x: x.get('ts', ''))
-    report = [f"Activity Report for {staff_name or 'All Staff'} ({start_date} to {end_date}):\n"]
-    current_staff = None
-    for event in all_events:
-        if not staff_name and event['name'] != current_staff:
-            current_staff = event['name']
-            report.append(f"\n--- {current_staff} ---")
-        try:
-            dt = datetime.datetime.fromisoformat(event['ts'])
-            report.append(f"  - At {dt.strftime('%I:%M:%S %p')}: {event['event']}")
-        except: report.append(f"  - At unknown time: {event['event']}")
-    return "\n".join(report)
-
-# --- AI & LANGUAGE PROCESSING ---
-def detect_language(text: str):
-    global translate_client
-    if not translate_client: return {'language': 'en'}
-    try:
-        result = translate_client.detect_language(text)
-        if result.get('language') == 'ml':
-            return {'language': 'ml'}
-        return {'language': 'en'}
-    except Exception as e:
-        print(f"ERROR: Language detection failed: {e}")
-        return {'language': 'en'}
-
-def translate_text(text: str, target_lang: str):
-    global translate_client
-    if not translate_client or not text: return text
-    try:
-        lang_code = target_lang.split('-')[0]
-        result = translate_client.translate(text, target_language=lang_code)
-        return result['translatedText']
-    except Exception as e:
-        print(f"ERROR: Translation failed: {e}")
-        return "Translation Error"
-
-def generate_audio_response(text: str, lang: str):
-    global tts_client
-    if not tts_client or not text: return None
-    base_lang = lang.split('-')[0]
-    voice_map = {'en': ("en-US", "en-US-Wavenet-D"), 'ml': ("ml-IN", "ml-IN-Wavenet-B")}
-    lang_code, voice_name = voice_map.get(base_lang, voice_map['en'])
-    voice = texttospeech.VoiceSelectionParams(language_code=lang_code, name=voice_name)
-    s_input = texttospeech.SynthesisInput(text=text)
-    a_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
-    try:
-        response = tts_client.synthesize_speech(input=s_input, voice=voice, audio_config=a_config)
-        return base64.b64encode(response.audio_content).decode('utf-8')
-    except Exception as e:
-        print(f"ERROR: TTS failed: {e}")
-        return None
-
-# --- MAIN BOT RESPONSE HANDLER ---
-def get_ownerbot_response(message: str, mode: str = 'voice'):
-    global db, model, translate_client
+def get_profit_report(start_date: str, end_date: str) -> str:
+    """Calculates profit and loss from Supabase data."""
     if not db:
-        return {"text_response": "Error: Database not loaded.", "audio_response": None}
-
+        return "Error: Database is not connected."
     try:
-        outlets_docs = db.collection('outlets').stream()
-        available_outlets = [{"id": doc.id, "name": doc.to_dict().get("name")} for doc in outlets_docs]
-    except Exception:
-        available_outlets = []
+        # 1. Revenue
+        sales_result = db.table('sales').select('total_amount').gte('date', start_date).lte('date', end_date).execute()
+        total_revenue = sum(row.get('total_amount', 0.0) for row in sales_result.data)
 
-    today_date = datetime.date.today()
-    
-    system_prompt = f"""
-    You are an expert data analyst for Asthana Bakery. Your main goal is to call the correct function to get reports. Today's date is {today_date.strftime('%Y-%m-%d')}.
-    Available outlets: {json.dumps(available_outlets)}.
-    RULES:
-    1. Infer dates: "today" is {today_date.isoformat()}, "yesterday" is {(today_date - datetime.timedelta(days=1)).isoformat()}.
-    2. If the user asks about "profit", "loss", or "earnings", you MUST use the `get_profit_report` function.
-    3. For sales reports, if an outlet is not specified, ask for one.
-    4. After a tool is called, present its output data directly as your final answer.
-    """
-    
-    if not model:
-        print("WARN: Gemini model not initialized, attempting re-initialization.")
-        initialize_clients() 
-        if not model: 
-            return {"text_response": "Error: Gemini model not available.", "audio_response": None}
+        # 2. Cost of Goods Sold (from production logs)
+        prod_result = db.table('production_logs').select('total_cost').gte('date', start_date).lte('date', end_date).execute()
+        cogs = sum(row.get('total_cost', 0.0) for row in prod_result.data)
 
-    tools = [
-        get_sales_report,
-        get_profit_report,
-        get_production_report,
-        get_inventory_report,
-        get_staff_activity_report
-    ]
-    
-    original_lang = detect_language(message).get('language', 'en')
-    msg_en = translate_text(message, 'en')
+        # 3. Operating Expenses
+        expenses_result = db.table('expenses').select('amount').gte('date', start_date).lte('date', end_date).execute()
+        op_expenses = sum(row.get('amount', 0.0) for row in expenses_result.data)
 
-    try:
-        chat = model.start_chat(enable_automatic_function_calling=True)
-        response = chat.send_message(msg_en, tools=tools) 
-        text_en = response.text
-            
-    except Exception as e:
-        print(f"ERROR: Gemini inference failed: {e}")
-        text_en = "I'm sorry, I had trouble understanding that. Please rephrase."
-
-    audio_b64 = None
-    if mode == 'voice':
-        summary_for_speech = text_en.split('\n')[0]
-        final_text = translate_text(text_en, original_lang)
-        audio_text = translate_text(summary_for_speech, original_lang)
-        audio_b64 = generate_audio_response(audio_text, original_lang)
-    else:
-        final_text = text_en
-    
-    return {"text_response": final_text, "audio_response": audio_b64}
-
-# --- NEW: Function to calculate profit ---
-def get_profit_report(start_date: str, end_date: str):
-    global db
-    """Calculates and returns a profit and loss summary for a given date range."""
-    if not db: return "Error: Database is not connected."
-    try:
-        # 1. Calculate Total Revenue
-        sales_query = db.collection('sales').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
-        total_revenue = sum(doc.to_dict().get('total_amount', 0.0) for doc in sales_query.stream())
-
-        # 2. Calculate Cost of Goods Sold (from production)
-        prod_query = db.collection('production_logs').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
-        cogs = sum(doc.to_dict().get('total_cost', 0.0) for doc in prod_query.stream())
-
-        # 3. Calculate Operating Expenses
-        expenses_query = db.collection('expenses').where(filter=FieldFilter('date', '>=', start_date)).where(filter=FieldFilter('date', '<=', end_date))
-        op_expenses = sum(doc.to_dict().get('amount', 0.0) for doc in expenses_query.stream())
-
-        # 4. Calculate Final Profit
+        # 4. Net Profit
         net_profit = total_revenue - (cogs + op_expenses)
 
         report = (
@@ -324,67 +267,357 @@ def get_profit_report(start_date: str, end_date: str):
     except Exception as e:
         return f"An error occurred while generating the profit report: {e}"
 
+
+def get_production_report(start_date: str = None, end_date: str = None) -> str:
+    """Fetches production data from Supabase."""
+    if not db:
+        return "Error: Database is not connected."
+    try:
+        today = datetime.date.today().isoformat()
+        query = db.table('production_logs').select('recipe_id, quantity_produced')
+
+        if start_date:
+            query = query.gte('date', start_date)
+        if end_date:
+            query = query.lte('date', end_date)
+        if not start_date and not end_date:
+            query = query.eq('date', today)
+
+        result = query.execute()
+        if not result.data:
+            return "No production data found."
+
+        produced = {}
+        for row in result.data:
+            recipe = row.get('recipe_id', 'Unknown')
+            produced[recipe] = produced.get(recipe, 0) + row.get('quantity_produced', 0)
+
+        report = "Production Report:\n" + "\n".join(
+            [f"  - {p.replace('_', ' ').title()}: {q} units" for p, q in sorted(produced.items())]
+        )
+        return report
+    except Exception as e:
+        return f"An error occurred while fetching production report: {e}"
+
+
+def get_inventory_report() -> str:
+    """Fetches current inventory from Supabase."""
+    if not db:
+        return "Error: Database is not connected."
+    try:
+        result = db.table('items').select('name, stock').order('name').execute()
+        if not result.data:
+            return "No inventory items found."
+
+        report_lines = ["Current Inventory Report:\n"]
+        for item in result.data:
+            report_lines.append(f"- {item.get('name', 'Unknown')}: {item.get('stock', 0)} units")
+        return "\n".join(report_lines)
+    except Exception as e:
+        return f"An error occurred while fetching inventory: {e}"
+
+
+def get_staff_activity_report(staff_name: str = None, start_date: str = None, end_date: str = None) -> str:
+    """Fetches staff attendance data from Supabase."""
+    if not db:
+        return "Error: Database is not connected."
+    try:
+        today = datetime.date.today().isoformat()
+        start_date = start_date or today
+        end_date = end_date or today
+
+        staff_id_to_filter = _get_staff_id_from_name(staff_name) if staff_name else None
+        if staff_name and not staff_id_to_filter:
+            return f"I could not find any staff member named '{staff_name}'."
+
+        # Fetch attendance records
+        query = db.table('attendance_records').select('*').gte('date', start_date).lte('date', end_date)
+        if staff_id_to_filter:
+            query = query.eq('staff_id', staff_id_to_filter)
+
+        result = query.order('timestamp').execute()
+        all_events = []
+
+        for record in result.data:
+            all_events.append({
+                "ts": record.get('timestamp'),
+                "name": record.get('staff_name', 'Unknown'),
+                "event": f"Manually {record.get('punch_type', 'punched').replace('_', ' ')} at {record.get('location_id', 'N/A')}."
+            })
+
+        # Fetch CCTV observations
+        cctv_query = db.table('cctv_observations').select('*').gte('date', start_date).lte('date', end_date)
+        if staff_name:
+            cctv_query = cctv_query.eq('staff_name', staff_name)
+
+        cctv_result = cctv_query.execute()
+        for record in cctv_result.data:
+            all_events.append({
+                "ts": record.get('timestamp'),
+                "name": record.get('staff_name', 'Unknown'),
+                "event": f"Spotted by CCTV on {record.get('camera_id', 'N/A')}."
+            })
+
+        if not all_events:
+            return f"No activities found for '{staff_name or 'any staff'}'."
+
+        all_events.sort(key=lambda x: x.get('ts', ''))
+        report = [f"Activity Report for {staff_name or 'All Staff'} ({start_date} to {end_date}):\n"]
+        current_staff = None
+        for event in all_events:
+            if not staff_name and event['name'] != current_staff:
+                current_staff = event['name']
+                report.append(f"\n--- {current_staff} ---")
+            try:
+                dt = datetime.datetime.fromisoformat(event['ts'])
+                report.append(f"  - At {dt.strftime('%I:%M:%S %p')}: {event['event']}")
+            except Exception:
+                report.append(f"  - At unknown time: {event['event']}")
+        return "\n".join(report)
+    except Exception as e:
+        return f"An error occurred while fetching staff activity: {e}"
+
+
+# --- Map function names to actual functions ---
+AVAILABLE_FUNCTIONS = {
+    "get_sales_report": get_sales_report,
+    "get_profit_report": get_profit_report,
+    "get_production_report": get_production_report,
+    "get_inventory_report": get_inventory_report,
+    "get_staff_activity_report": get_staff_activity_report,
+}
+
+
+# --- AI & LANGUAGE PROCESSING ---
+def detect_language(text: str) -> dict:
+    if not GOOGLE_CLOUD_AVAILABLE or not translate_client:
+        return {'language': 'en'}
+    try:
+        result = translate_client.detect_language(text)
+        if result.get('language') == 'ml':
+            return {'language': 'ml'}
+        return {'language': 'en'}
+    except Exception as e:
+        print(f"ERROR: Language detection failed: {e}")
+        return {'language': 'en'}
+
+
+def translate_text(text: str, target_lang: str) -> str:
+    if not GOOGLE_CLOUD_AVAILABLE or not translate_client or not text:
+        return text
+    try:
+        lang_code = target_lang.split('-')[0]
+        result = translate_client.translate(text, target_language=lang_code)
+        return result['translatedText']
+    except Exception as e:
+        print(f"ERROR: Translation failed: {e}")
+        return text
+
+
+def generate_audio_response(text: str, lang: str):
+    if not GOOGLE_CLOUD_AVAILABLE or not tts_client or not text:
+        return None
+    base_lang = lang.split('-')[0]
+    voice_map = {
+        'en': ("en-US", "en-US-Wavenet-D"),
+        'ml': ("ml-IN", "ml-IN-Wavenet-B")
+    }
+    lang_code, voice_name = voice_map.get(base_lang, voice_map['en'])
+    voice = texttospeech.VoiceSelectionParams(language_code=lang_code, name=voice_name)
+    s_input = texttospeech.SynthesisInput(text=text)
+    a_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
+    try:
+        response = tts_client.synthesize_speech(input=s_input, voice=voice, audio_config=a_config)
+        return base64.b64encode(response.audio_content).decode('utf-8')
+    except Exception as e:
+        print(f"ERROR: TTS failed: {e}")
+        return None
+
+
+# --- MAIN BOT RESPONSE HANDLER (Groq + Supabase) ---
+def get_ownerbot_response(message: str, mode: str = 'voice') -> dict:
+    """
+    Processes a user message using Groq AI with tool calling.
+    Fetches data from Supabase via tool functions.
+    """
+    global groq_client, db
+
+    if not groq_client:
+        return {"text_response": "Error: AI model not loaded.", "audio_response": None}
+    if not db:
+        return {"text_response": "Error: Database not connected.", "audio_response": None}
+
+    try:
+        # Fetch available outlets for context
+        outlets_result = db.table('outlets').select('id, name').execute()
+        available_outlets = outlets_result.data if outlets_result.data else []
+    except Exception:
+        available_outlets = []
+
+    today_date = datetime.date.today()
+
+    system_prompt = f"""You are an expert data analyst for Asthana Bakery. Your main goal is to call the correct function to get reports and then present the data clearly to the owner.
+
+Today's date is {today_date.strftime('%Y-%m-%d')}.
+Available outlets: {json.dumps(available_outlets)}.
+
+RULES:
+1. Infer dates: "today" is {today_date.isoformat()}, "yesterday" is {(today_date - datetime.timedelta(days=1)).isoformat()}.
+2. If the user asks about "profit", "loss", or "earnings", you MUST use the `get_profit_report` function.
+3. For sales reports, if an outlet is not specified, use all outlets.
+4. After a tool is called, present its output data directly as your final answer. Be concise and helpful.
+5. Use ₹ for currency values.
+6. If the user's question doesn't require data, answer conversationally."""
+
+    # Detect language and translate to English for the AI
+    original_lang = detect_language(message).get('language', 'en')
+    msg_en = translate_text(message, 'en')
+
+    try:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": msg_en}
+        ]
+
+        # First call — the model may request tool calls
+        response = groq_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=messages,
+            tools=TOOL_DEFINITIONS,
+            tool_choice="auto",
+            max_tokens=2048,
+            temperature=0.3,
+        )
+
+        response_message = response.choices[0].message
+
+        # If the model wants to call tools, execute them
+        if response_message.tool_calls:
+            messages.append(response_message)
+
+            for tool_call in response_message.tool_calls:
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
+
+                print(f"DEBUG: Groq calling tool '{function_name}' with args: {function_args}")
+
+                # Execute the function
+                func = AVAILABLE_FUNCTIONS.get(function_name)
+                if func:
+                    function_result = func(**function_args)
+                else:
+                    function_result = f"Error: Unknown function '{function_name}'"
+
+                # Add the tool result to the conversation
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": str(function_result)
+                })
+
+            # Second call — model summarizes the tool results
+            second_response = groq_client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=messages,
+                max_tokens=2048,
+                temperature=0.3,
+            )
+            text_en = second_response.choices[0].message.content
+        else:
+            # No tool calls needed — direct response
+            text_en = response_message.content
+
+    except Exception as e:
+        print(f"ERROR: Groq inference failed: {e}")
+        text_en = "I'm sorry, I had trouble understanding that. Please rephrase."
+
+    # Handle voice mode (translate back and generate audio)
+    audio_b64 = None
+    if mode == 'voice':
+        summary_for_speech = text_en.split('\n')[0]
+        final_text = translate_text(text_en, original_lang)
+        audio_text = translate_text(summary_for_speech, original_lang)
+        audio_b64 = generate_audio_response(audio_text, original_lang)
+    else:
+        final_text = text_en
+
+    return {"text_response": final_text, "audio_response": audio_b64}
+
+
+# --- VOICE ORDER PARSING (Groq) ---
 def parse_voice_order(spoken_text: str):
     """
-    Analyzes spoken text to identify products and how they are being ordered.
-    This version has a corrected f-string prompt to fix the format specifier error.
+    Analyzes spoken text to identify bakery products and how they are being ordered.
+    Uses Groq AI instead of Gemini.
     """
+    global groq_client, db
+
     if not db:
         return {"error": "Database not connected."}
+    if not groq_client:
+        return {"error": "AI model not available."}
+
     print(f"DEBUG: Parsing smart voice order: '{spoken_text}'")
-    
+
     try:
-        products_ref = db.collection('items')
-        docs = products_ref.stream()
-        
+        # Fetch available products from Supabase
+        result = db.table('items').select('id, name, malayalam_name, unit_type').execute()
         available_products_details = []
-        for doc in docs:
-            product_data = doc.to_dict()
-            if product_data.get('name'):
+        for item in result.data:
+            if item.get('name'):
                 available_products_details.append({
-                    "id": doc.id,
-                    "name": product_data.get('name', '').lower(),
-                    "malayalam_name": product_data.get('malayalam_name', '').lower(), 
-                    "unit_type": product_data.get('unit_type', 'piece')
+                    "id": item['id'],
+                    "name": item.get('name', '').lower(),
+                    "malayalam_name": item.get('malayalam_name', '').lower(),
+                    "unit_type": item.get('unit_type', 'piece')
                 })
 
         if not available_products_details:
             return {"error": "No products found in the database to match against."}
 
-        prompt = f"""
-        You are a highly accurate billing assistant for a bakery in Kerala, India.
-        Your task is to analyze a spoken order and convert it into a structured JSON list.
-        The order can be in Malayalam, English, or a mix (Manglish).
+        prompt = f"""You are a highly accurate billing assistant for a bakery in Kerala, India.
+Your task is to analyze a spoken order and convert it into a structured JSON list.
+The order can be in Malayalam, English, or a mix (Manglish).
 
-        Here is the list of available products with their English and Malayalam names:
-        {json.dumps(available_products_details, indent=2, ensure_ascii=False)}
+Here is the list of available products with their English and Malayalam names:
+{json.dumps(available_products_details, indent=2, ensure_ascii=False)}
 
-        The spoken order is: "{spoken_text}"
+The spoken order is: "{spoken_text}"
 
-        Follow these rules VERY STRICTLY:
-        1.  Match the words in the order to a product from the list. The match can be with the 'name' or the 'malayalam_name'.
-        2.  If a number is followed by 'രൂപക്ക്', 'roopakku', 'rs', or 'rupees', or preceded by 'for', it is ALWAYS a "custom_price".
-        3.  If a number is followed by 'kg', 'kilo', 'gram', or 'gm', or 'കിലോ', 'ഗ്രാം', it is ALWAYS "weight_grams". Convert all weights to grams (e.g., 'അര കിലോ' is 500 grams, '1 kg' is 1000 grams).
-        4.  If a number (like 'രണ്ട്' or '2') appears with a piece item, it is "quantity".
-        5.  If no number is specified for a 'piece' item, assume "quantity" is 1.
-        6.  The 'item_id' in your response MUST BE the exact 'id' from the product list for the matched product.
-        7.  If you cannot clearly identify a product or instruction, return an empty list: [].
+Follow these rules VERY STRICTLY:
+1.  Match the words in the order to a product from the list. The match can be with the 'name' or the 'malayalam_name'.
+2.  If a number is followed by 'രൂപക്ക്', 'roopakku', 'rs', or 'rupees', or preceded by 'for', it is ALWAYS a "custom_price".
+3.  If a number is followed by 'kg', 'kilo', 'gram', or 'gm', or 'കിലോ', 'ഗ്രാം', it is ALWAYS "weight_grams". Convert all weights to grams (e.g., 'അര കിലോ' is 500 grams, '1 kg' is 1000 grams).
+4.  If a number (like 'രണ്ട്' or '2') appears with a piece item, it is "quantity".
+5.  If no number is specified for a 'piece' item, assume "quantity" is 1.
+6.  The 'item_id' in your response MUST BE the exact 'id' from the product list for the matched product.
+7.  If you cannot clearly identify a product or instruction, return an empty list: []
 
-        Your output MUST be ONLY a valid JSON list of objects.
+Your output MUST be ONLY a valid JSON list of objects. No markdown, no explanation.
 
-        Example 1 (piece): "two puffs" -> [{{"item_id": "puff_id", "quantity": 2}}]
-        Example 2 (weight - English): "oru kilo mixture" -> [{{"item_id": "mixture_id", "weight_grams": 1000}}]
-        Example 3 (price - Malayalam): "20 രൂപക്ക് ലഡു" -> [{{"item_id": "laddu_id", "custom_price": 20}}]
-        Example 4 (price - Manglish): "madak for 100 rs" -> [{{"item_id": "madak_id", "custom_price": 100}}]
-        Example 5 (weight - Malayalam): "അര കിലോ ജിലേബി" -> [{{"item_id": "jilebi_id", "weight_grams": 500}}]
-        Example 6 (quantity - Malayalam): "രണ്ട് പഫ്" -> [{{"item_id": "puff_id", "quantity": 2}}]
-        Example 7 (multiple items): "ഒരു കിലോ ബോണ്ടയും രണ്ട് സമൂസയും" -> [{{"item_id": "bonda_id", "weight_grams": 1000}}, {{"item_id": "samosa_id", "quantity": 2}}]
-        """
-    
-        response = model.generate_content(prompt)
-        cleaned_response = response.text.strip().replace('```json', '').replace('```', '').strip()
-        print(f"DEBUG: Parsed order from AI: {cleaned_response}")
-    
+Example 1 (piece): "two puffs" -> [{{"item_id": "puff_id", "quantity": 2}}]
+Example 2 (weight): "oru kilo mixture" -> [{{"item_id": "mixture_id", "weight_grams": 1000}}]
+Example 3 (price): "20 രൂപക്ക് ലഡു" -> [{{"item_id": "laddu_id", "custom_price": 20}}]
+Example 4 (price): "madak for 100 rs" -> [{{"item_id": "madak_id", "custom_price": 100}}]
+Example 5 (weight): "അര കിലോ ജിലേബി" -> [{{"item_id": "jilebi_id", "weight_grams": 500}}]
+Example 6 (quantity): "രണ്ട് പഫ്" -> [{{"item_id": "puff_id", "quantity": 2}}]
+Example 7 (multiple): "ഒരു കിലോ ബോണ്ടയും രണ്ട് സമൂസയും" -> [{{"item_id": "bonda_id", "weight_grams": 1000}}, {{"item_id": "samosa_id", "quantity": 2}}]"""
+
+        response = groq_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a JSON-only billing assistant. Respond with valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1024,
+            temperature=0.1,
+        )
+
+        cleaned_response = response.choices[0].message.content.strip()
+        # Remove markdown code fences if present
+        cleaned_response = cleaned_response.replace('```json', '').replace('```', '').strip()
+        print(f"DEBUG: Parsed order from Groq: {cleaned_response}")
+
         if not cleaned_response:
             return []
 
@@ -394,160 +627,5 @@ def parse_voice_order(spoken_text: str):
         return parsed_order
 
     except Exception as e:
-        print(f"ERROR: Failed to parse voice order with AI: {e}")
+        print(f"ERROR: Failed to parse voice order with Groq: {e}")
         return {"error": f"Sorry, I could not understand the order: '{spoken_text}'."}
-
-
-# --- Flask Endpoints ---
-
-@app.route('/voice-to-text/', methods=['POST'])
-def handle_voice_to_text():
-    # <-- THIS ENTIRE FUNCTION IS UPDATED -->
-    if 'Content-Type' not in request.headers or 'audio/wav' not in request.headers['Content-Type']:
-        return jsonify({"error": "Unsupported Media Type. Please send audio/wav."}), 415
-
-    temp_audio_path = None
-    try:
-        audio_data = request.data
-
-        # Create a temporary file to save the audio
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio_file:
-            temp_audio_file.write(audio_data)
-            temp_audio_path = temp_audio_file.name
-        
-        print(f"DEBUG: Audio saved to temporary path: {temp_audio_path}")
-
-        # --- REPLACED WITH REPLICATE API CALL ---
-        # Call the Replicate API with the audio file
-        output = replicate.run(
-            "openai/whisper:4d50797290df275b2bbcf15a841807abde342525f2b84217579199f5d30bedf7",
-            input={
-                "audio": open(temp_audio_path, "rb"),
-                "language": "ml"
-            }
-        )
-        recognized_text = output['transcription']
-        # --- END OF REPLACEMENT ---
-
-        # Clean up the temporary file
-        os.unlink(temp_audio_path)
-        
-        print(f"DEBUG: Backend Recognized Text: '{recognized_text}'")
-
-        # Now, pass the recognized text to your existing parse_voice_order function
-        parsed_order_data = parse_voice_order(recognized_text)
-
-        # Check if parse_voice_order returned an error dictionary
-        if isinstance(parsed_order_data, dict) and 'error' in parsed_order_data:
-            return jsonify(parsed_order_data), 400
-
-        return jsonify({
-            "recognized_text": recognized_text,
-            "parsed_order": parsed_order_data
-        }), 200
-
-    except Exception as e:
-        print(f"ERROR: Error processing voice-to-text on backend: {e}")
-        # Clean up temp file in case of error
-        if temp_audio_path and os.path.exists(temp_audio_path):
-            os.unlink(temp_audio_path)
-        return jsonify({"error": f"Internal server error during voice processing: {str(e)}"}), 500
-
-@app.route('/items/manage-products/', methods=['GET'])
-def get_products():
-    global db
-    if not db:
-        return jsonify({"error": "Database not connected"}), 500
-    try:
-        products_ref = db.collection('items')
-        docs = products_ref.stream()
-        products_list = []
-        for doc in docs:
-            product_data = doc.to_dict()
-            product_data['id'] = doc.id # Add document ID
-            products_list.append(product_data)
-        return jsonify(products_list), 200
-    except Exception as e:
-        print(f"Error fetching products: {e}")
-        return jsonify({"error": f"Failed to fetch products: {str(e)}"}), 500
-
-@app.route('/outlets/manage/', methods=['GET'])
-def get_outlets():
-    global db
-    if not db:
-        return jsonify({"error": "Database not connected"}), 500
-    try:
-        outlets_ref = db.collection('outlets')
-        docs = outlets_ref.stream()
-        outlets_list = []
-        for doc in docs:
-            outlet_data = doc.to_dict()
-            outlet_data['id'] = doc.id # Add document ID
-            outlets_list.append(outlet_data)
-        return jsonify(outlets_list), 200
-    except Exception as e:
-        print(f"Error fetching outlets: {e}")
-        return jsonify({"error": f"Failed to fetch outlets: {str(e)}"}), 500
-
-@app.route('/sales/process/', methods=['POST'])
-def process_sale_endpoint():
-    global db
-    if not db:
-        return jsonify({"error": "Database not connected"}), 500
-    try:
-        sale_data = request.get_json()
-        if not sale_data:
-            return jsonify({"error": "No sale data provided"}), 400
-
-        if not isinstance(sale_data.get('items'), list) or not sale_data.get('outlet_id') or not sale_data.get('total_amount') is not None:
-            return jsonify({"error": "Invalid sale data format"}), 400
-
-        timestamp_ms = int(datetime.datetime.now().timestamp() * 1000)
-        numeric_bill_id = str(timestamp_ms)[-8:]
-
-        sale_data['timestamp'] = datetime.datetime.now().isoformat()
-        sale_data['date'] = datetime.date.today().isoformat()
-        sale_data['numeric_bill_id'] = numeric_bill_id
-
-        batch = db.batch()
-        for item in sale_data['items']:
-            product_id = item.get('product_id')
-            quantity = item.get('quantity', 0)
-            unit_type = item.get('unit_type')
-
-            if product_id and unit_type == 'piece' and quantity > 0:
-                product_ref = db.collection('items').document(product_id)
-                batch.update(product_ref, {'stock': firestore.Increment(-quantity)})
-        
-        batch.commit()
-        doc_ref = db.collection('sales').add(sale_data)
-        
-        return jsonify({"message": "Sale processed successfully", "bill_id": doc_ref[1].id, "numeric_bill_id": numeric_bill_id}), 201
-
-    except Exception as e:
-        print(f"Error processing sale: {e}")
-        return jsonify({"error": f"Failed to process sale: {str(e)}"}), 500
-
-@app.route('/sales/find/<string:numeric_bill_id>/', methods=['GET'])
-def find_sale_by_numeric_id(numeric_bill_id):
-    global db
-    if not db:
-        return jsonify({"error": "Database not connected"}), 500
-    try:
-        query = db.collection('sales').where(filter=FieldFilter('numeric_bill_id', '==', numeric_bill_id)).limit(1)
-        docs = list(query.stream())
-
-        if docs:
-            sale_data = docs[0].to_dict()
-            return jsonify(sale_data), 200
-        else:
-            return jsonify({"error": "Bill not found"}), 404
-    except Exception as e:
-        print(f"Error finding bill: {e}")
-        return jsonify({"error": f"Failed to find bill: {str(e)}"}), 500
-
-
-if __name__ == '__main__':
-    # Flask development server settings.
-    # For production, use a WSGI server like Gunicorn.
-    app.run(host='0.0.0.0', port=8000, debug=True)
