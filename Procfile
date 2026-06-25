@@ -1,1 +1,0 @@
-web: gunicorn bakery_ai_manager.wsgi --log-file -
